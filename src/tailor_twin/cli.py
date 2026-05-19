@@ -80,5 +80,29 @@ def bent_arm_cmd(ctx: typer.Context) -> None:
     raise typer.Exit(bent_arm_main(ctx.args))
 
 
+@app.command(
+    name="refine-tape",
+    help="Adjust a fit's betas so tape-measured values (height/bust/"
+         "waist/hip/…) match the user's real measurements.",
+    context_settings={"allow_extra_args": True,
+                       "ignore_unknown_options": True},
+)
+def refine_tape_cmd(ctx: typer.Context) -> None:
+    from tailor_twin.fit.refine_to_tape_cli import main as refine_main
+    raise typer.Exit(refine_main(ctx.args))
+
+
+@app.command(
+    name="shapy-import",
+    help="Import SHAPY regressor output(s) (image → SMPL-X betas) as a "
+         "tailor-twin fit_npz. Photos-only front-end: no LiDAR scan.",
+    context_settings={"allow_extra_args": True,
+                       "ignore_unknown_options": True},
+)
+def shapy_import_cmd(ctx: typer.Context) -> None:
+    from tailor_twin.io.shapy_import_cli import main as shapy_import_main
+    raise typer.Exit(shapy_import_main(ctx.args))
+
+
 if __name__ == "__main__":
     app()

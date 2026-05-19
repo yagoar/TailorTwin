@@ -21,7 +21,7 @@ _CACHE: dict[tuple[str, str], dict[str, Any]] = {}
 
 # Bump when the payload shape changes (new fields, renamed fields,
 # different unit conventions). Older persisted payloads are recomputed.
-_SCHEMA_VERSION = 10
+_SCHEMA_VERSION = 11
 
 
 def _vertical_ruler(anchor_floor, anchor_top, body_v, offset: float = 0.10):
@@ -193,9 +193,15 @@ def scan_payload(results_dir: Path, name: str) -> dict[str, Any]:
         _vertex_normals,
     )
 
-    gender = fit_gender(np.load(npz))
+    fit_data_meta = np.load(npz)
+    gender = fit_gender(fit_data_meta)
+    # Read the actual beta count from the npz instead of hard-coding —
+    # the scan pipeline saves a fit at whatever --num-betas was passed
+    # (commonly 100); the bent-arm repose below also rebuilds SMPL-X with
+    # the same count so the betas tensor matches the model basis.
+    npz_num_betas = int(fit_data_meta["betas"].shape[0])
     verts, faces, joints = _load_fit(
-        npz, "data/body_models", gender, 300,
+        npz, "data/body_models", gender, npz_num_betas,
     )
     landmarks = build_landmark_set(verts, joints=joints, faces=faces,
                                     gender=gender)
@@ -223,7 +229,8 @@ def scan_payload(results_dir: Path, name: str) -> dict[str, Any]:
         from tailor_twin.measure.exports import write_obj
         body_model = smplx.create(
             model_path="data/body_models", model_type="smplx",
-            gender=gender, num_betas=300, use_pca=False, batch_size=1,
+            gender=gender, num_betas=npz_num_betas,
+            use_pca=False, batch_size=1,
         )
         fit_data = np.load(npz)
         pose = repose_bent_arm(fit_data, body_model)

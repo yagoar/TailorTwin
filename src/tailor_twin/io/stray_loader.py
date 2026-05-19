@@ -108,6 +108,11 @@ def _read_odometry(path: Path) -> list[dict[str, str]]:
         rows = list(reader)
     if not rows:
         raise ValueError(f"odometry.csv is empty: {path}")
+    # Stray writes headers with leading spaces (" frame" etc.) and the
+    # values inherit the same spacing. Strip both so downstream lookups
+    # by canonical column name work without callers caring.
+    rows = [{k.strip(): (v.strip() if v is not None else v) for k, v in r.items()}
+            for r in rows]
     missing = [c for c in _ODOM_COLS if c not in rows[0]]
     if missing:
         raise ValueError(

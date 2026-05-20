@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>TailorTwin Capture</title>
+<style>
+  /* palette shared with the desktop GUI (gui/static/styles.css) */
+  :root {
+    --bg:#f4f4f7; --bg-card:#ffffff; --ink:#0b0b0f; --ink-soft:#494955;
+    --ink-faint:#8b8b96; --line:#ececf1; --line-2:#d8d8e0;
+    --accent:#6f5cf6; --accent-ink:#4c3fc0; --accent-soft:#efeaff;
+    --ok:#10b981; --err:#ef4444;
+    --shadow:0 1px 2px rgba(11,11,15,.04), 0 12px 30px -10px rgba(11,11,15,.10);
+    --radius:16px; --radius-sm:10px;
+    color-scheme:light;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  body { background:var(--bg); color:var(--ink); height:100vh; overflow:hidden;
+         font:14px/1.5 "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  .hidden { display:none !important; }
+
+  /* form panels — light, card-based, matches the GUI */
+  .panel { position:fixed; inset:0; display:flex; flex-direction:column;
+           align-items:center; justify-content:center; padding:24px;
+           background:var(--bg); text-align:center; }
+  .card { background:var(--bg-card); border:1px solid var(--line);
+          border-radius:var(--radius); box-shadow:var(--shadow);
+          padding:26px 24px; width:100%; max-width:360px;
+          display:flex; flex-direction:column; gap:14px; }
+  h1 { font-family:"Space Grotesk","Inter",sans-serif; font-weight:600;
+       font-size:21px; }
+  p.sub { color:var(--ink-soft); font-size:13px; }
+  label { color:var(--ink-soft); font-weight:500; font-size:13px;
+          text-align:left; margin-bottom:-8px; }
+  input[type=number], select { width:100%; padding:10px 12px;
+        border:1px solid var(--line-2); border-radius:var(--radius-sm);
+        background:#fff; font:inherit; color:var(--ink); }
+  input:focus, select:focus { outline:none; border-color:var(--accent);
+        box-shadow:0 0 0 3px var(--accent-soft); }
+  button { font:inherit; font-weight:500; padding:10px 18px; cursor:pointer;
+           border-radius:var(--radius-sm); border:1px solid var(--line-2);
+           background:#fff; color:var(--ink); transition:all .15s ease; }
+  button.primary { background:linear-gradient(135deg,#8b7dff 0%,#6f5cf6 50%,#5b46e8 100%);
+           color:#fff; border-color:transparent; padding:12px 22px;
+           box-shadow:0 4px 14px -4px rgba(111,92,246,.55); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .err { color:var(--err); font-size:13px; }
+
+  /* live camera view — necessarily dark */
+  #p-live { padding:0; background:#000; }
+  video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#000; }
+  #frame { position:absolute; border:2.5px dashed #ffffff88; border-radius:var(--radius); }
+  #pose { position:absolute; inset:0; width:100%; height:100%;
+          object-fit:contain; opacity:.34; pointer-events:none; }
+
+  #hud { position:absolute; top:0; left:0; right:0; padding:14px 16px 26px;
+         background:linear-gradient(#000c,#0000); color:#fff; }
+  #step { font-family:"Space Grotesk","Inter",sans-serif; font-weight:600;
+          font-size:13px; letter-spacing:.12em; text-transform:uppercase; }
+  #tip  { color:#d2d2d6; font-size:13px; margin-top:4px; }
+
+  #level { position:absolute; top:78px; left:50%; transform:translateX(-50%);
+           display:flex; align-items:center; gap:9px; padding:9px 16px;
+           border-radius:999px; font-weight:500; font-size:14px; color:#fff;
+           white-space:nowrap; background:rgba(20,20,26,.82);
+           -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
+  #level.ok { background:rgba(16,185,129,.92); }
+  #arrow { font-size:19px; line-height:1; }
+
+  #ctrls { position:absolute; bottom:0; left:0; right:0; padding:20px 18px 34px;
+           display:flex; align-items:center; justify-content:space-between;
+           background:linear-gradient(#0000,#000c); }
+  #shutter { width:74px; height:74px; border-radius:50%; background:#fff;
+             border:5px solid var(--accent); flex:none; }
+  #shutter:disabled { border-color:#777; background:#9a9a9a; }
+  #flip { background:rgba(20,20,26,.82); color:#fff; border-color:transparent;
+          padding:11px 15px; border-radius:999px; }
+  #count { position:absolute; inset:0; display:flex; align-items:center;
+           justify-content:center; font-size:130px; font-weight:700; color:#fff;
+           text-shadow:0 2px 24px #000; }
+
+  .thumbs { display:flex; gap:14px; justify-content:center; }
+  .thumbs figure { font-size:12px; color:var(--ink-soft); }
+  .thumbs img { width:116px; height:164px; object-fit:cover; display:block;
+                border-radius:var(--radius-sm); border:1px solid var(--line-2);
+                margin-bottom:5px; }
+  .row { display:flex; gap:10px; justify-content:center; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- 1. intro -->
+  <div class="panel" id="p-intro">
+    <div class="card">
+      <h1>TailorTwin Capture</h1>
+      <p class="sub">Two photos — front, then side. Tight clothing, plain wall,
+         phone propped vertically ~3&nbsp;m away. Match the on-screen outline.</p>
+      <label for="gender">Gender</label>
+      <select id="gender">
+        <option value="" selected disabled>select…</option>
+        <option value="female">Female</option>
+        <option value="male">Male</option>
+        <option value="neutral">Prefer not to say</option>
+      </select>
+      <label for="height">Height (cm)</label>
+      <input type="number" id="height" inputmode="decimal" placeholder="e.g. 170">
+      <label for="weight">Weight (kg)</label>
+      <input type="number" id="weight" inputmode="decimal" placeholder="e.g. 65">
+      <button class="primary" id="start">Start capture</button>
+      <p class="err" id="introErr"></p>
+    </div>
+  </div>
+
+  <!-- 2. live -->
+  <div class="panel hidden" id="p-live">
+    <video id="video" playsinline muted autoplay></video>
+    <div id="frame"><img id="pose"></div>
+
+    <div id="hud">
+      <div id="step">Step 1 / 2 — Front</div>
+      <div id="tip">Face the camera, arms ~45° out, fill the outline.</div>
+    </div>
+
+    <div id="level"><span id="arrow">•</span><span id="levelmsg">checking…</span></div>
+
+    <div id="count" class="hidden"></div>
+
+    <div id="ctrls">
+      <button id="flip">Flip</button>
+      <button id="shutter" disabled></button>
+      <div style="width:62px"></div>
+    </div>
+  </div>
+
+  <!-- 3. review -->
+  <div class="panel hidden" id="p-review">
+    <div class="card">
+      <h1>Review</h1>
+      <div class="thumbs">
+        <figure><img id="t-front">front</figure>
+        <figure><img id="t-side">side</figure>
+      </div>
+      <div class="row">
+        <button id="redo">Retake</button>
+        <button class="primary" id="send">Upload</button>
+      </div>
+      <p class="err" id="reviewErr"></p>
+    </div>
+  </div>
+
+  <!-- 4. done -->
+  <div class="panel hidden" id="p-done">
+    <div class="card">
+      <h1>✓ Uploaded</h1>
+      <p class="sub" id="doneMsg">Photos saved. You can close this page.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const TOL = 2;             // degrees from vertical that still counts as level
+const TOL_REL = 3.5;       // hysteresis: must exceed this to drop out of level
+const COUNTDOWN = 4;       // seconds before a shot
+const MOVE_TOL = 3;        // °: phone movement during countdown that aborts
+const FRAME_ASPECT = 0.60; // guide frame w/h — same for front and side
+
+let stream = null, facing = "environment";
+let pitch = 99, roll = 99, levelState = false;   // degrees from vertical
+let stepIdx = 0;
+const shots = [null, null], shotMeta = [null, null];
+const POSE_SRC = ["/static/pose_front.png", "/static/pose_side.png"];
+
+/* ---------- intro ---------- */
+$("start").onclick = async () => {
+  const h = parseFloat($("height").value);
+  const w = parseFloat($("weight").value);
+  const g = $("gender").value;
+  if (!g)                       { $("introErr").textContent = "select a gender"; return; }
+  if (!(h > 80 && h < 230))     { $("introErr").textContent = "enter a valid height (cm)"; return; }
+  if (!(w > 25 && w < 300))     { $("introErr").textContent = "enter a valid weight (kg)"; return; }
+  try { await requestMotion(); await openCamera(); }
+  catch (e) { $("introErr").textContent = "camera/sensor blocked: " + e.message; return; }
+  $("p-intro").classList.add("hidden");
+  $("p-live").classList.remove("hidden");
+  layoutFrame();
+  setStep(0);
+};
+window.addEventListener("resize", layoutFrame);
+
+/* ---------- tilt sensing ---------- */
+async function requestMotion() {
+  const D = window.DeviceMotionEvent;
+  if (D && typeof D.requestPermission === "function") {
+    const r = await D.requestPermission();
+    if (r !== "granted") throw new Error("motion sensor denied");
+  }
+  window.addEventListener("devicemotion", onMotion);
+}
+/* Tilt is derived from the gravity vector, not the DeviceOrientation
+   Euler angles. At phone-vertical (beta ≈ 90°) the Euler angles sit on
+   a gimbal-lock singularity — roll turns jumpy, pitch turns mushy, so
+   the two axes feel wildly different. Gravity has no singularity here,
+   and an equal low-pass on both axes makes them respond the same. */
+function onMotion(e) {
+  const g = e.accelerationIncludingGravity;
+  if (!g || g.x == null) return;
+  const rad = 180 / Math.PI;
+  const rRoll  = Math.atan2(g.x, -g.y) * rad;   // left/right, 0 = upright
+  const rPitch = Math.atan2(g.z, -g.y) * rad;   // forward/back, 0 = upright
+  const a = 0.25;                               // equal smoothing both axes
+  roll  = roll  > 90 ? rRoll  : roll  + a * (rRoll  - roll);
+  pitch = pitch > 90 ? rPitch : pitch + a * (rPitch - pitch);
+  updateLevel();
+}
+/* Coarse level read-out: one message + one arrow, generous tolerance,
+   hysteresis so it does not flicker. No fine dot to chase. */
+function updateLevel() {
+  const worst = Math.max(Math.abs(roll), Math.abs(pitch));
+  levelState = levelState ? worst < TOL_REL : worst < TOL;
+
+  const lv = $("level"), arrow = $("arrow"), msg = $("levelmsg");
+  if (levelState) {
+    lv.classList.add("ok"); arrow.textContent = "✓";
+    msg.textContent = "phone upright";
+  } else {
+    lv.classList.remove("ok");
+    // If a direction reads inverted on a given phone, flip the sign test.
+    if (Math.abs(pitch) >= Math.abs(roll)) {
+      if (pitch < 0) { arrow.textContent = "↓"; msg.textContent = "tilt the top toward you"; }
+      else           { arrow.textContent = "↑"; msg.textContent = "tilt the top away from you"; }
+    } else {
+      if (roll > 0)  { arrow.textContent = "↺"; msg.textContent = "rotate phone left"; }
+      else           { arrow.textContent = "↻"; msg.textContent = "rotate phone right"; }
+    }
+  }
+  // Cancel an in-progress shot if the phone shifts from where it was
+  // when the countdown began — the framing the user lined up is gone.
+  if (counting &&
+      (Math.abs(pitch - startPitch) > MOVE_TOL ||
+       Math.abs(roll - startRoll) > MOVE_TOL)) {
+    abortCapture();
+    return;
+  }
+  refreshShutter();
+}
+
+/* ---------- camera ---------- */
+async function openCamera() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: facing, width: { ideal: 1440 }, height: { ideal: 2560 } },
+    audio: false,
+  });
+  $("video").srcObject = stream;
+}
+$("flip").onclick = async () => {
+  facing = facing === "environment" ? "user" : "environment";
+  try { await openCamera(); } catch (e) {}
+};
+
+/* ---------- guide frame + pose ---------- */
+function layoutFrame() {
+  const W = innerWidth, H = innerHeight;
+  let fh = 0.90 * H, fw = fh * FRAME_ASPECT;
+  if (fw > 0.94 * W) { fw = 0.94 * W; fh = fw / FRAME_ASPECT; }
+  const fr = $("frame");
+  fr.style.left = ((W - fw) / 2) + "px"; fr.style.top = ((H - fh) / 2) + "px";
+  fr.style.width = fw + "px"; fr.style.height = fh + "px";
+}
+function setStep(i) {
+  stepIdx = i;
+  $("step").textContent = i === 0 ? "Step 1 / 2 — Front" : "Step 2 / 2 — Side";
+  $("tip").textContent = i === 0
+    ? "Face the camera, arms ~45° out, fill the outline."
+    : "Turn 90° — right side to the camera, facing left. Arms down.";
+  $("pose").src = POSE_SRC[i];
+}
+
+/* ---------- capture ---------- */
+let counting = false, ctTimer = null, startPitch = 0, startRoll = 0;
+/* Only the gyroscope gates the shutter — the phone must be vertical for
+   the silhouette projection to be metric. */
+function refreshShutter() {
+  $("shutter").disabled = counting || !levelState;
+}
+$("shutter").onclick = () => {
+  if (counting || !levelState) return;
+  counting = true;
+  startPitch = pitch; startRoll = roll;   // pose to hold for the countdown
+  refreshShutter();
+  let n = COUNTDOWN;
+  const el = $("count");
+  el.style.fontSize = ""; el.textContent = n;
+  el.classList.remove("hidden");
+  ctTimer = setInterval(() => {
+    n -= 1;
+    if (n <= 0) {
+      clearInterval(ctTimer); ctTimer = null;
+      el.classList.add("hidden"); counting = false;
+      grab(); refreshShutter();
+    } else { el.textContent = n; }
+  }, 1000);
+};
+/* Phone moved mid-countdown — cancel; the lined-up framing is gone. */
+function abortCapture() {
+  if (ctTimer) { clearInterval(ctTimer); ctTimer = null; }
+  counting = false;
+  const el = $("count");
+  el.textContent = "moved ✕"; el.style.fontSize = "54px";
+  setTimeout(() => { el.classList.add("hidden"); el.style.fontSize = ""; }, 1100);
+  refreshShutter();
+}
+function grab() {
+  const v = $("video");
+  const vw = v.videoWidth, vh = v.videoHeight;
+  // Save exactly the portrait region the user sees. The <video> is
+  // object-fit:cover over the portrait viewport — replicate that crop
+  // so the JPEG matches the framing on screen, no rotation guesswork.
+  const VW = innerWidth, VH = innerHeight;
+  const scale = Math.max(VW / vw, VH / vh);
+  const sw = Math.min(vw, Math.round(VW / scale));
+  const sh = Math.min(vh, Math.round(VH / scale));
+  const sx = Math.round((vw - sw) / 2), sy = Math.round((vh - sh) / 2);
+  const c = document.createElement("canvas");
+  c.width = sw; c.height = sh;
+  const ctx = c.getContext("2d");
+  if (facing === "user") { ctx.translate(sw, 0); ctx.scale(-1, 1); }
+  ctx.drawImage(v, sx, sy, sw, sh, 0, 0, sw, sh);
+  c.toBlob(blob => {
+    if (shots[stepIdx]) URL.revokeObjectURL(shots[stepIdx].url);
+    shots[stepIdx] = { blob, url: URL.createObjectURL(blob) };
+    shotMeta[stepIdx] = { pitch, roll };
+    if (stepIdx === 0) { setStep(1); refreshShutter(); }
+    else showReview();
+  }, "image/jpeg", 0.95);
+}
+
+/* ---------- review / upload ---------- */
+function showReview() {
+  $("t-front").src = shots[0].url;
+  $("t-side").src = shots[1].url;
+  $("p-live").classList.add("hidden");
+  $("p-review").classList.remove("hidden");
+}
+$("redo").onclick = () => {
+  $("p-review").classList.add("hidden");
+  $("p-live").classList.remove("hidden");
+  setStep(0);
+};
+$("send").onclick = async () => {
+  $("send").disabled = true;
+  $("reviewErr").textContent = "uploading…";
+  const fd = new FormData();
+  fd.append("front", shots[0].blob, "front.jpg");
+  fd.append("side", shots[1].blob, "side.jpg");
+  fd.append("height_cm", $("height").value);
+  fd.append("weight_kg", $("weight").value);
+  fd.append("gender", $("gender").value);
+  fd.append("meta", JSON.stringify({ front: shotMeta[0], side: shotMeta[1] }));
+  try {
+    const r = await fetch("/upload", { method: "POST", body: fd });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || "server error");
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    $("doneMsg").textContent = "Saved to " + j.saved + ". You can close this page.";
+    $("p-review").classList.add("hidden");
+    $("p-done").classList.remove("hidden");
+  } catch (e) {
+    $("reviewErr").textContent = "upload failed: " + e.message;
+    $("send").disabled = false;
+  }
+};
+</script>
+</body>
+</html>

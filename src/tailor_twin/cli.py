@@ -104,5 +104,32 @@ def shapy_import_cmd(ctx: typer.Context) -> None:
     raise typer.Exit(shapy_import_main(ctx.args))
 
 
+@app.command(
+    name="ring-deform",
+    help="Deform a fit's mesh per-ring so PlanarGirth circumferences "
+         "(bust/waist/hip/…) hit tape exactly. Geometric edit — no "
+         "shape-space coupling, unlike refine-tape.",
+    context_settings={"allow_extra_args": True,
+                       "ignore_unknown_options": True},
+)
+def ring_deform_cmd(ctx: typer.Context) -> None:
+    from tailor_twin.fit.ring_deform_cli import main as ring_deform_main
+    raise typer.Exit(ring_deform_main(ctx.args))
+
+
+@app.command(
+    name="fuse-priors",
+    help="Combine a LiDAR-chamfer fit and a SHAPY image-regression fit "
+         "into one SMPL-X fit npz. Best-of-both: LiDAR's scan-specific "
+         "high-order betas + SHAPY's CAESAR-trained anthropometric prior "
+         "on the dominant shape modes.",
+    context_settings={"allow_extra_args": True,
+                       "ignore_unknown_options": True},
+)
+def fuse_priors_cmd(ctx: typer.Context) -> None:
+    from tailor_twin.fit.fuse_priors_cli import main as fuse_priors_main
+    raise typer.Exit(fuse_priors_main(ctx.args))
+
+
 if __name__ == "__main__":
     app()

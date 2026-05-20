@@ -60,6 +60,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--passes", type=int, default=4)
     p.add_argument("--waist-y", type=float, default=None,
                    help="Override waist slice Y (m). Else from landmarks.")
+    p.add_argument("--a-pose-shoulder-deg", type=float, default=30.0,
+                   help="Re-pose the fit to canonical A-pose before "
+                        "deforming (0 = T-pose). The chamfer-fit mesh "
+                        "carries the scan-time pose; this discards it so "
+                        "the deformed OBJ is in a clean garment pose.")
     args = p.parse_args(argv)
 
     targets_cm = dict(_parse_target(s) for s in args.target)
@@ -72,19 +77,38 @@ def main(argv: list[str] | None = None) -> int:
             f"A01 (height) + {sorted(_CODE_TO_LANDMARK)}")
 
     fit = np.load(args.fit_npz)
-    verts = fit["smplx_vertices"].astype(np.float64)
-    joints = (fit["smplx_joints"].astype(np.float32)
-              if "smplx_joints" in fit.files else None)
 
     from ..fit.fit import fit_gender
     from ..measure.landmarks import build_landmark_set
     import smplx
+    import torch
 
     gender = fit_gender(fit)
     bm = smplx.create(model_path=args.model_folder, model_type="smplx",
                       gender=gender, num_betas=args.num_betas,
-                      use_pca=False, batch_size=1)
+                      use_pca=False, flat_hand_mean=True, batch_size=1)
     faces = np.asarray(bm.faces, dtype=np.int32)
+
+    # Re-pose to canonical A-pose. The chamfer-fit mesh carries the
+    # scan-time pose (twisted torso, asymmetric arms); ring deformation
+    # only edits girths, so without this the OBJ stays in that pose.
+    # Regenerate vertices from the fit's betas + a canonical pose.
+    from .refine_to_tape import _build_a_pose
+    betas = fit["betas"].astype(np.float32)
+    canon_pose = _build_a_pose(args.a_pose_shoulder_deg).astype(np.float32)
+    with torch.no_grad():
+        out = bm(
+            betas=torch.from_numpy(betas[None, :]),
+            body_pose=torch.from_numpy(canon_pose.reshape(1, -1)),
+            global_orient=torch.zeros(1, 3),
+            transl=torch.zeros(1, 3),
+            return_full_pose=False,
+        )
+    verts = out.vertices[0].cpu().numpy().astype(np.float64)
+    joints = out.joints[0].cpu().numpy().astype(np.float32)
+    disp = fit["displacement"] if "displacement" in fit.files else None
+    if disp is not None and disp.shape == verts.shape:
+        verts = verts + disp
 
     landmarks = build_landmark_set(
         verts.astype(np.float32), joints=joints, faces=faces,
@@ -194,11 +218,19 @@ def main(argv: list[str] | None = None) -> int:
                 scales[0], deform_mask)
 
     # Save a fit npz mirroring the source with deformed vertices.
+    # Pose fields are overwritten with the canonical A-pose used above
+    # so the npz is internally consistent (verts ↔ pose) and the
+    # bent-arm re-pose offsets from a known base.
     out_prefix = args.out_prefix
     out_prefix.parent.mkdir(parents=True, exist_ok=True)
     out_npz = out_prefix.with_name(out_prefix.name + "_smplx_fit.npz")
     payload = {k: fit[k] for k in fit.files}
     payload["smplx_vertices"] = deformed.astype(np.float32)
+    payload["smplx_joints"] = joints
+    payload["body_pose"] = canon_pose
+    payload["global_orient"] = np.zeros((3,), dtype=np.float32)
+    payload["transl"] = np.zeros((3,), dtype=np.float32)
+    payload["z"] = np.array([])
     np.savez(out_npz, **payload)
     print(f"\nwrote {out_npz}")
 

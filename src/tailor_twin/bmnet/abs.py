@@ -365,8 +365,12 @@ class AbsSampler:
             for i in range(adv.shape[0]):
                 x, z = self._input_and_target(adv[i], std)
                 pred = model(x[None])[0]
-                # L1 in centimetres — the BMnet training objective.
-                loss = loss + (torch.abs(pred - z) * m_std).mean()
+                # Adversarial objective L(y, y_gt) = ||y - y_gt||^2,
+                # the squared-L2 measurement error in centimetres
+                # (paper Eq. 4). Note this differs from the L1 BMnet
+                # *training* loss — the search uses squared error.
+                err_cm = (pred - z) * m_std
+                loss = loss + (err_cm ** 2).sum()
             grad, = torch.autograd.grad(loss, adv)
             adv = (adv.detach() + lr * grad.detach()).clamp(
                 -BETA_CLAMP, BETA_CLAMP)

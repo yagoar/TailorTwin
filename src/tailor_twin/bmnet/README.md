@@ -110,13 +110,16 @@ python -m tailor_twin.bmnet.train --epochs 150 --abs --out data/results/bmnet.pt
 | `--img-h`           | 256     | per-view height                             |
 | `--img-w`           | 192     | per-view width; input is `2*img_w` wide     |
 | `--device`          | auto    | `cuda` / `mps` / `cpu`                      |
-| `--val-split`       | testA   |                                             |
+| `--report-split`    | testA   | final per-measure table; not used for selection |
 | `--abs`             | off     | enable the adversarial body simulator       |
 | `--abs-epochs`      | 10      | phase 2 — adversarial synthetic fine-tune   |
-| `--abs-batches`     | 40      | adversarial batches generated per ABS epoch |
+| `--abs-batches`     | 280     | adversarial batches per ABS epoch — `len(train)/batch` reproduces the paper's ~10×-real-data regime |
 | `--abs-real-epochs` | 5       | phase 3 — real-data fine-tune               |
 | `--abs-lr`          | 1e-4    | learning rate for the ABS fine-tune phases  |
 | `--abs-num-betas`   | 16      | SMPL-X shape betas the simulator varies     |
+
+Best-model selection uses a 10 % holdout of the training set (paper §5);
+`--report-split` stays untouched for the final table.
 
 ABS is GPU-bound — each adversarial batch is a 10-step gradient ascent
 through the renderer; run `--abs` on the GPU, not on MPS/CPU.

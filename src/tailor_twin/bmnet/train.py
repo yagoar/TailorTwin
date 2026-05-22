@@ -1,17 +1,20 @@
 """Train BMnet on the BodyM dataset, with optional ABS augmentation.
 
-Follows the paper's recipe: L1 loss on the 14 measurements, Adam, a
-multi-step learning-rate schedule, and the BodyM TestA split as the
-validation set.
+Follows the paper's recipe (§3.1, §5): L1 loss on the 14 measurements,
+Adam at 1e-3, batch 22, a multi-step learning-rate schedule dropping
+×0.1 at 75 % and 88 % of training, and best-model selection on a held-out
+10 % of the training set. The reporting split (BodyM TestA by default)
+is kept untouched for the final per-measurement table.
 
 With ``--abs`` the adversarial body simulator (``bmnet.abs``) is enabled,
-reproducing the paper's three-phase schedule:
+reproducing the paper's three-phase schedule (§3.2):
 
   1. pre-train on real BodyM photos (``--epochs``);
-  2. fine-tune on adversarial synthetic bodies — each batch is rendered
-     from SMPL-X shapes driven by gradient ascent on the *current*
-     BMnet's loss (``--abs-epochs``);
-  3. a short real-data fine-tune to re-anchor the synthetic→real domain
+  2. fine-tune for ``--abs-epochs`` epochs on adversarial synthetic
+     bodies — each batch is rendered from SMPL-X shapes driven by
+     gradient ascent on the *current* BMnet's loss, freshly sampled
+     every epoch (never repeated);
+  3. a short real-data fine-tune to bridge the synthetic→real domain
      gap (``--abs-real-epochs``).
 
 The loss is evaluated in centimetres: the network emits standardized
@@ -29,11 +32,14 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 
 from . import MEAS_COLS
 from .dataset import BodyMDataset, compute_standardizer
 from .model import BMnet
+
+# Fraction of the training set held out for best-model selection (§5).
+HOLDOUT_FRAC = 0.10
 
 
 def _device(name: str) -> torch.device:
@@ -61,8 +67,9 @@ def _evaluate(model, loader, std_t, dev) -> tuple[float, np.ndarray]:
 
 
 def _train_pass(model, opt, batches, std_t, dev) -> float:
-    """One epoch over an iterable of ``(x, z)`` batches. Returns the
-    mean L1 error in centimetres."""
+    """One epoch over an iterable of ``(x, z)`` batches. The BMnet
+    training loss is the L1 measurement error in centimetres
+    (``|z_pred - z| * meas_std``). Returns the mean cm error."""
     model.train()
     sw = std_t.to(dev)
     run, n = 0.0, 0
@@ -70,7 +77,6 @@ def _train_pass(model, opt, batches, std_t, dev) -> float:
         x, z = x.to(dev), z.to(dev)
         opt.zero_grad()
         pred = model(x)
-        # L1 in centimetres: |z_pred - z| * meas_std.
         loss = (torch.abs(pred - z) * sw).mean()
         loss.backward()
         opt.step()
@@ -101,15 +107,18 @@ def main(argv: list[str] | None = None) -> int:
                    help="per-view width; network input is 2*img_w wide")
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--device", default="auto")
-    p.add_argument("--val-split", default="testA")
+    p.add_argument("--report-split", default="testA",
+                   help="held-out split for the final per-measure table")
+    p.add_argument("--seed", type=int, default=0)
     p.add_argument("--model-folder", default="data/body_models")
     # --- ABS adversarial augmentation -----------------------------------
     p.add_argument("--abs", action="store_true",
                    help="enable adversarial body simulator fine-tuning")
     p.add_argument("--abs-epochs", type=int, default=10,
                    help="phase 2: epochs of synthetic adversarial bodies")
-    p.add_argument("--abs-batches", type=int, default=40,
-                   help="adversarial batches generated per ABS epoch")
+    p.add_argument("--abs-batches", type=int, default=280,
+                   help="adversarial batches per ABS epoch; the paper's "
+                        "~10x-real-data regime is len(train)/batch_size")
     p.add_argument("--abs-real-epochs", type=int, default=5,
                    help="phase 3: real-data fine-tune epochs")
     p.add_argument("--abs-lr", type=float, default=1e-4,
@@ -127,17 +136,26 @@ def main(argv: list[str] | None = None) -> int:
     std = compute_standardizer(args.data_root, "train")
     print("measurement mean (cm):", np.round(std.meas_mean, 1).tolist())
 
-    train_ds = BodyMDataset(args.data_root, "train", std,
-                            img_h=args.img_h, img_w=args.img_w)
-    val_ds = BodyMDataset(args.data_root, args.val_split, std,
-                          img_h=args.img_h, img_w=args.img_w)
-    print(f"train: {len(train_ds)} photos   "
-          f"{args.val_split}: {len(val_ds)} photos")
+    # Best-model selection uses a 10 % holdout of the training set; the
+    # report split (TestA) stays untouched for the final table (§5).
+    full_train = BodyMDataset(args.data_root, "train", std,
+                              img_h=args.img_h, img_w=args.img_w)
+    n_hold = max(1, int(HOLDOUT_FRAC * len(full_train)))
+    n_tr = len(full_train) - n_hold
+    g = torch.Generator().manual_seed(args.seed)
+    train_ds, hold_ds = random_split(full_train, [n_tr, n_hold],
+                                     generator=g)
+    report_ds = BodyMDataset(args.data_root, args.report_split, std,
+                             img_h=args.img_h, img_w=args.img_w)
+    print(f"train: {n_tr}   holdout(val): {n_hold}   "
+          f"{args.report_split}: {len(report_ds)}")
 
     train_ld = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
                           num_workers=args.workers, drop_last=True)
-    val_ld = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
-                        num_workers=args.workers)
+    hold_ld = DataLoader(hold_ds, batch_size=args.batch_size, shuffle=False,
+                         num_workers=args.workers)
+    report_ld = DataLoader(report_ds, batch_size=args.batch_size,
+                           shuffle=False, num_workers=args.workers)
 
     model = BMnet(n_out=len(MEAS_COLS)).to(dev)
     std_t = torch.from_numpy(std.meas_std.astype(np.float32))   # cm weights
@@ -155,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
         t0 = time.time()
         train_mae = _train_pass(model, opt, train_ld, std_t, dev)
         sched.step()
-        val_mae, _ = _evaluate(model, val_ld, std_t, dev)
+        val_mae, _ = _evaluate(model, hold_ld, std_t, dev)
         flag = ""
         if val_mae < best:
             best = val_mae
@@ -182,11 +200,12 @@ def main(argv: list[str] | None = None) -> int:
         print("\n=== phase 2: adversarial synthetic fine-tuning ===")
         for ep in range(1, args.abs_epochs + 1):
             t0 = time.time()
+            # Fresh adversarial bodies every epoch — never repeated.
             batches = [sampler.make_batch(model, std, args.batch_size,
                                           sigma=args.abs_seed_sigma)
                        for _ in range(args.abs_batches)]
             train_mae = _train_pass(model, opt, batches, std_t, dev)
-            val_mae, _ = _evaluate(model, val_ld, std_t, dev)
+            val_mae, _ = _evaluate(model, hold_ld, std_t, dev)
             flag = ""
             if val_mae < best:
                 best = val_mae
@@ -199,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         for ep in range(1, args.abs_real_epochs + 1):
             t0 = time.time()
             train_mae = _train_pass(model, opt, train_ld, std_t, dev)
-            val_mae, _ = _evaluate(model, val_ld, std_t, dev)
+            val_mae, _ = _evaluate(model, hold_ld, std_t, dev)
             flag = ""
             if val_mae < best:
                 best = val_mae
@@ -210,10 +229,11 @@ def main(argv: list[str] | None = None) -> int:
                   f"({time.time() - t0:4.0f}s){flag}")
 
     # ------------------------------------------------------------------
-    print(f"\nbest {args.val_split} MAE: {best:.2f} cm  ->  {args.out}")
+    print(f"\nbest holdout MAE: {best:.2f} cm  ->  {args.out}")
     ck = torch.load(args.out, map_location=dev, weights_only=False)
     model.load_state_dict(ck["state_dict"])
-    _, per = _evaluate(model, val_ld, std_t, dev)
+    report_mae, per = _evaluate(model, report_ld, std_t, dev)
+    print(f"{args.report_split} MAE: {report_mae:.2f} cm")
     print("per-measurement MAE (cm):")
     for name, e in zip(MEAS_COLS, per):
         print(f"  {name:<20} {e:6.2f}")

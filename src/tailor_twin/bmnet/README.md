@@ -93,24 +93,24 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install numpy scipy opencv-python pillow
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-# 4. train (auto-detects the GPU)
-python -m tailor_twin.bmnet.train --epochs 150 --out data/results/bmnet.pt
+# 4. train the baseline — paper recipe, 150k iterations (auto-detects GPU)
+python -m tailor_twin.bmnet.train --iters 150000 --out data/results/bmnet.pt
 
 # 4b. or train with the adversarial body simulator
-python -m tailor_twin.bmnet.train --epochs 150 --abs --out data/results/bmnet.pt
+python -m tailor_twin.bmnet.train --iters 150000 --abs --out data/results/bmnet.pt
 ```
 
 `train.py` flags:
 
 | flag                | default | note                                       |
 |---------------------|---------|--------------------------------------------|
-| `--epochs`          | 80      | phase 1 — 150k paper iters ≈ 540 epochs     |
+| `--iters`           | 150000  | phase-1 iterations — the paper's value      |
 | `--batch-size`      | 22      | paper value                                 |
-| `--lr`              | 1e-3    | Adam; ×0.1 at 75 % and 88 % of epochs       |
-| `--img-h`           | 256     | per-view height                             |
-| `--img-w`           | 192     | per-view width; input is `2*img_w` wide     |
+| `--lr`              | 1e-3    | Adam; ×0.1 at 75 % and 88 % of iterations   |
+| `--img-h`           | 640     | per-view height — paper value               |
+| `--img-w`           | 480     | per-view width — paper value; input `2*img_w` wide |
 | `--device`          | auto    | `cuda` / `mps` / `cpu`                      |
-| `--report-split`    | testA   | final per-measure table; not used for selection |
+| `--report-splits`   | testA testB | final per-measure tables; not used for selection |
 | `--abs`             | off     | enable the adversarial body simulator       |
 | `--abs-epochs`      | 10      | phase 2 — adversarial synthetic fine-tune   |
 | `--abs-batches`     | 280     | adversarial batches per ABS epoch — `len(train)/batch` reproduces the paper's ~10×-real-data regime |
@@ -118,16 +118,17 @@ python -m tailor_twin.bmnet.train --epochs 150 --abs --out data/results/bmnet.pt
 | `--abs-lr`          | 1e-4    | learning rate for the ABS fine-tune phases  |
 | `--abs-num-betas`   | 16      | SMPL-X shape betas the simulator varies     |
 
-Best-model selection uses a 10 % holdout of the training set (paper §5);
-`--report-split` stays untouched for the final table.
+The defaults reproduce the paper exactly: 150 000 iterations, 640×480
+per-view input, batch 22, Adam 1e-3, ×0.1 LR drop at 75 % / 88 %, and
+best-model selection on a 10 % holdout of the training set (§5). The
+report splits (TestA, TestB) stay untouched for the final tables.
 
 ABS is GPU-bound — each adversarial batch is a 10-step gradient ascent
 through the renderer; run `--abs` on the GPU, not on MPS/CPU.
 
-With a GPU you can afford the paper's full-resolution input —
-`--img-h 640 --img-w 480`. The checkpoint records its own `img_h` /
-`img_w`, so `predict` and `refine` reproduce the right preprocessing
-automatically. Copy `data/results/bmnet.pt` back to the capture machine.
+The checkpoint records its own `img_h` / `img_w`, so `predict` and
+`refine` reproduce the right preprocessing automatically. Copy
+`data/results/bmnet.pt` back to the capture machine.
 
 ## Predict + SMPL-X integration (capture machine)
 
@@ -156,15 +157,16 @@ improvements below.
 
 ### Step 0 — baseline (next)
 
-Plain BMnet, **no `--abs`**, paper-resolution input, on the GPU:
+Plain BMnet, **no `--abs`**, exact paper recipe, on the GPU:
 
 ```bash
-python -m tailor_twin.bmnet.train --epochs 150 \
-    --img-h 640 --img-w 480 --out data/results/bmnet.pt
+python -m tailor_twin.bmnet.train --iters 150000 --out data/results/bmnet.pt
 ```
 
-This is the clean reference number and confirms the data path. ABS
-(`--abs`) is the second run, once the baseline is verified.
+The defaults already match the paper (150k iterations, 640×480 input,
+batch 22, Adam 1e-3, ×0.1 LR at 75 %/88 %). This is the clean reference
+number and confirms the data path. ABS (`--abs`) is the second run,
+once the baseline is verified.
 
 ### Planned improvements (ranked by expected impact)
 

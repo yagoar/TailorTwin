@@ -39,8 +39,8 @@ steps, betas clamped to ±3).
 
 `abs.py` re-implements every differentiable block for SMPL-X:
 
-* `render_pair` — soft front+side silhouettes (reuses the soft splat
-  renderer of `fit.silhouette_render`);
+* `render_pair` — soft front+side silhouettes (a self-contained
+  bilinear-splat soft rasterizer);
 * `mesh_measurements` — the 14 measurements as mesh geometry: torso
   girths are horizontal-slice convex perimeters (Cauchy's formula),
   limb girths are sliced *perpendicular to the bone*, lengths are joint

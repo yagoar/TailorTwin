@@ -11,7 +11,7 @@ This file provides every differentiable submodule the paper's Figure 1b
 needs, re-implemented for SMPL-X:
 
 * ``render_pair``        — soft front+side silhouettes (the renderer R),
-                           reusing ``fit.silhouette_render.soft_silhouette``.
+                           a self-contained bilinear-splat soft rasterizer.
 * ``mesh_measurements`` — the 14 BodyM measurements as mesh geometry
                            (the extractor g): girths are angle-sorted
                            cross-section perimeters, lengths are joint
@@ -218,6 +218,44 @@ def mesh_height_weight(verts: torch.Tensor,
 _BODY_FRAC = 0.86          # body height as a fraction of the image height
 
 
+def _gauss_kernel(sigma: float, device) -> torch.Tensor:
+    """Separable 2-D Gaussian convolution kernel, shape (1, 1, k, k)."""
+    r = max(int(round(3 * sigma)), 1)
+    x = torch.arange(-r, r + 1, dtype=torch.float32, device=device)
+    g = torch.exp(-(x ** 2) / (2 * sigma ** 2))
+    g = g / g.sum()
+    return (g[:, None] * g[None, :])[None, None]
+
+
+def soft_silhouette(uv: torch.Tensor, H: int, W: int,
+                    kernel: torch.Tensor, *, occ_k: float = 8.0
+                    ) -> torch.Tensor:
+    """Bilinearly splat projected vertices ``uv`` (N, 2 pixels) → soft
+    mask. Differentiable in ``uv``: the four-corner bilinear weights
+    carry the sub-pixel gradient. The Gaussian blur fills inter-vertex
+    gaps into a solid mask; ``1 - exp(-k·acc)`` squashes the splat
+    accumulation into a [0, 1] occupancy."""
+    import torch.nn.functional as F
+
+    u, v = uv[:, 0], uv[:, 1]
+    u0 = torch.floor(u)
+    v0 = torch.floor(v)
+    fu, fv = u - u0, v - v0
+    u0 = u0.long().clamp(0, W - 2)
+    v0 = v0.long().clamp(0, H - 2)
+    acc = torch.zeros(H * W, dtype=uv.dtype, device=uv.device)
+    for du in (0, 1):
+        for dv in (0, 1):
+            wu = fu if du else (1.0 - fu)
+            wv = fv if dv else (1.0 - fv)
+            idx = (v0 + dv) * W + (u0 + du)
+            acc = acc.index_add(0, idx, wu * wv)
+    acc = acc.view(1, 1, H, W)
+    pad = kernel.shape[-1] // 2
+    blur = F.conv2d(acc, kernel, padding=pad)
+    return 1.0 - torch.exp(-occ_k * blur[0, 0])
+
+
 def _face_points(verts: torch.Tensor, faces: torch.Tensor,
                  bary: torch.Tensor) -> torch.Tensor:
     """Dense surface samples — every face sampled on a barycentric grid.
@@ -234,8 +272,6 @@ def render_pair(verts: torch.Tensor, faces: torch.Tensor,
     Orthographic projection; the front view reads X/Y, the side view
     reads Z/Y at the same metric pixel scale so the two silhouettes keep
     consistent proportions."""
-    from ..fit.silhouette_render import soft_silhouette
-
     pts = _face_points(verts, faces, bary)
     x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
     y_lo, y_hi = y.min(), y.max()
@@ -269,7 +305,6 @@ class AbsSampler:
         import smplx
 
         from ..fit.refine_to_tape import _build_a_pose
-        from ..fit.silhouette_render import _gauss_kernel
         from ..measure.regions import region_vertex_mask
 
         self.dev = torch.device(device)

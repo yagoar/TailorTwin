@@ -12,9 +12,10 @@ silhouettes + height + weight; the three ambiguous girths then become
 authoritative targets for `fit.refine_to_tape`, which nudges the SMPL-X
 betas of a base fit to hit them.
 
-The adversarial body simulator (ABS) augmentation from the paper is
-**not** implemented — an optional ~10 % refinement. Plain supervised
-BMnet already reaches ~1.5 cm waist error.
+The adversarial body simulator (ABS) augmentation from the paper *is*
+implemented (`abs.py`, `--abs` flag) — see below. Plain supervised BMnet
+already reaches ~1.5 cm waist error; ABS adds robustness on the
+under-represented body shapes (high BMI especially).
 
 ## Modules
 
@@ -22,9 +23,42 @@ BMnet already reaches ~1.5 cm waist error.
 |--------------|------------------------------------------------------------|
 | `model.py`   | `BMnet` — MNASNet backbone + 128-wide MLP head, 14 outputs. |
 | `dataset.py` | `BodyMDataset` split loader; `build_input` tensor builder.  |
-| `train.py`   | training CLI — L1, Adam, multi-step LR, TestA validation.   |
+| `abs.py`     | adversarial body simulator — differentiable render + g.     |
+| `train.py`   | training CLI — L1, Adam, multi-step LR, optional `--abs`.   |
 | `predict.py` | checkpoint → 14 measurements from two silhouettes.          |
 | `refine.py`  | BMnet girths → seamly codes → `refine_betas_to_tape`.       |
+
+## ABS — adversarial body simulator (paper §3.2)
+
+ABS searches the SMPL-X shape space for body shapes the *current* BMnet
+predicts worst, and turns them into extra training pairs. The whole
+chain — betas → SMPL-X mesh → silhouette render → BMnet, and betas →
+mesh → ground-truth measurements — is differentiable, so the search is
+plain gradient **ascent** on the BMnet loss (Eq. 6: η = 0.1, k = 10
+steps, betas clamped to ±3).
+
+`abs.py` re-implements every differentiable block for SMPL-X:
+
+* `render_pair` — soft front+side silhouettes (reuses the soft splat
+  renderer of `fit.silhouette_render`);
+* `mesh_measurements` — the 14 measurements as mesh geometry: torso
+  girths are horizontal-slice convex perimeters (Cauchy's formula),
+  limb girths are sliced *perpendicular to the bone*, lengths are joint
+  distances;
+* `mesh_height_weight` — height from the bounding box, weight from the
+  closed-mesh volume × tissue density;
+* `AbsSampler` — seeds random shapes, runs the ascent, emits batches in
+  `dataset.build_input` layout.
+
+`--abs` runs the paper's three-phase schedule: (1) supervised pre-train
+on real BodyM; (2) fine-tune on adversarial synthetic bodies; (3) a
+short real-data fine-tune to bridge the synthetic→real gap.
+
+Deliberate, bounded simplifications: pose is a fixed canonical A-pose
+(BMnet sees only silhouettes); the measurement function `g` is defined
+in `abs.py` rather than by registered BodyM vertex paths, but it is used
+identically for the synthetic target and inside the search, so it is
+self-consistent, and phase 3 re-anchors any systematic offset.
 
 ## Dataset
 
@@ -61,19 +95,31 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
 # 4. train (auto-detects the GPU)
 python -m tailor_twin.bmnet.train --epochs 150 --out data/results/bmnet.pt
+
+# 4b. or train with the adversarial body simulator
+python -m tailor_twin.bmnet.train --epochs 150 --abs --out data/results/bmnet.pt
 ```
 
 `train.py` flags:
 
-| flag           | default               | note                                  |
-|----------------|-----------------------|----------------------------------------|
-| `--epochs`     | 80                    | 150k paper iters ≈ 540 epochs           |
-| `--batch-size` | 22                    | paper value                             |
-| `--lr`         | 1e-3                  | Adam; ×0.1 at 75 % and 88 % of epochs   |
-| `--img-h`      | 256                   | per-view height                         |
-| `--img-w`      | 192                   | per-view width; input is `2*img_w` wide |
-| `--device`     | auto                  | `cuda` / `mps` / `cpu`                  |
-| `--val-split`  | testA                 |                                         |
+| flag                | default | note                                       |
+|---------------------|---------|--------------------------------------------|
+| `--epochs`          | 80      | phase 1 — 150k paper iters ≈ 540 epochs     |
+| `--batch-size`      | 22      | paper value                                 |
+| `--lr`              | 1e-3    | Adam; ×0.1 at 75 % and 88 % of epochs       |
+| `--img-h`           | 256     | per-view height                             |
+| `--img-w`           | 192     | per-view width; input is `2*img_w` wide     |
+| `--device`          | auto    | `cuda` / `mps` / `cpu`                      |
+| `--val-split`       | testA   |                                             |
+| `--abs`             | off     | enable the adversarial body simulator       |
+| `--abs-epochs`      | 10      | phase 2 — adversarial synthetic fine-tune   |
+| `--abs-batches`     | 40      | adversarial batches generated per ABS epoch |
+| `--abs-real-epochs` | 5       | phase 3 — real-data fine-tune               |
+| `--abs-lr`          | 1e-4    | learning rate for the ABS fine-tune phases  |
+| `--abs-num-betas`   | 16      | SMPL-X shape betas the simulator varies     |
+
+ABS is GPU-bound — each adversarial batch is a 10-step gradient ascent
+through the renderer; run `--abs` on the GPU, not on MPS/CPU.
 
 With a GPU you can afford the paper's full-resolution input —
 `--img-h 640 --img-w 480`. The checkpoint records its own `img_h` /

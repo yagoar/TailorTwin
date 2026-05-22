@@ -22,6 +22,7 @@ under-represented body shapes (high BMI especially).
 | file         | role                                                       |
 |--------------|------------------------------------------------------------|
 | `model.py`   | `BMnet` — MNASNet backbone + 128-wide MLP head, 14 outputs. |
+| `download_bodym.py` | mirror the public BodyM S3 bucket (resumable).      |
 | `dataset.py` | `BodyMDataset` split loader; `build_input` tensor builder.  |
 | `abs.py`     | adversarial body simulator — differentiable render + g.     |
 | `train.py`   | training CLI — L1, Adam, multi-step LR, optional `--abs`.   |
@@ -74,7 +75,20 @@ mask_left/<photo_id>.png  lateral silhouette
 ```
 
 The repo expects it unpacked at `data/bodym/` (git-ignored). `train`
-(6134 photos) and `testA` (1684) are enough to train and validate.
+(6134 photos) and `testA` (1684) are enough to train and validate;
+`testB` (1160) is the in-the-wild report split.
+
+The bucket is public, so `download_bodym.py` mirrors it with an
+unsigned S3 client — no AWS account, resumable, parallel:
+
+```bash
+pip install boto3
+python -m tailor_twin.bmnet.download_bodym --dest data/bodym
+# or a subset:  --splits train testA
+```
+
+(Equivalently `aws s3 sync --no-sign-request --region us-west-2
+s3://amazon-bodym data/bodym`.)
 
 ## Running on WSL + NVIDIA GPU
 
@@ -85,13 +99,13 @@ device-agnostic — `train.py` auto-selects `cuda` when available.
 # 1. clone the repo into WSL, cd into it
 git clone <repo-url> tailor-twin && cd tailor-twin
 
-# 2. unpack the BodyM dataset (transfer data/bodym/ or the tarball)
-mkdir -p data && tar xzf bodym.tar.gz -C data/
-
-# 3. python env + CUDA torch
+# 2. python env + CUDA torch
 python3 -m venv .venv && . .venv/bin/activate
-pip install numpy scipy opencv-python pillow
+pip install numpy scipy opencv-python pillow boto3 smplx
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# 3. download the BodyM dataset straight from S3 (no tarball needed)
+python -m tailor_twin.bmnet.download_bodym --dest data/bodym
 
 # 4. train the baseline — paper recipe, 150k iterations (auto-detects GPU)
 python -m tailor_twin.bmnet.train --iters 150000 --out data/results/bmnet.pt

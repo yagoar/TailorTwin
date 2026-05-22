@@ -147,3 +147,60 @@ handles). It writes a refined `*_smplx_fit.npz`, an OBJ, and a
 measurement CSV. Only chest/waist/hip (seamly G04/G07/G09) are
 transferred — height is a known input and the limb measurements are
 left to the geometry the front pointmap already pinned.
+
+## Roadmap
+
+Current state is a faithful BMnet + ABS re-implementation. The plan is
+to first train a **baseline** on the data we have, then layer in the
+improvements below.
+
+### Step 0 — baseline (next)
+
+Plain BMnet, **no `--abs`**, paper-resolution input, on the GPU:
+
+```bash
+python -m tailor_twin.bmnet.train --epochs 150 \
+    --img-h 640 --img-w 480 --out data/results/bmnet.pt
+```
+
+This is the clean reference number and confirms the data path. ABS
+(`--abs`) is the second run, once the baseline is verified.
+
+### Planned improvements (ranked by expected impact)
+
+Not yet implemented — listed so the design intent is recorded.
+
+1. **Depth + normal input channels.** BMnet sees only two binary
+   silhouettes, which discard the cross-section shape — the root cause
+   of waist/bust under-read. tailor-twin already has the Sapiens front
+   pointmap (metric depth) and surface normals; add them as input
+   channels. ABS can render synthetic depth for free (mesh → depth is
+   differentiable); real BodyM keeps the depth channels zeroed, so the
+   two domains mix. Blocked on a depth-bearing training set.
+2. **Gender input.** BodyM ships a gender label that is currently
+   unused; the same silhouette + height + weight maps to different
+   girths for male vs female fat distribution. Concat a gender scalar
+   to the pooled MNASNet features. ABS would render synthetic bodies
+   with the male/female SMPL-X models (not only neutral) so the
+   synthetic samples carry a real gender label. To be done before a
+   future training run, since it fixes the input shape.
+3. **Calibrate `g` to BodyM, init ABS from real betas.** The geometric
+   measurement function `g` in `abs.py` has a systematic offset (~few
+   cm) from BodyM's scan-derived measurements, so phase 2 and phase 3
+   partly disagree. Fitting SMPL-X to a sample of BodyM bodies would
+   (a) calibrate `g`'s slice levels and (b) seed the adversarial ascent
+   from realistic betas instead of `N(0, 1)`.
+4. **Synthetic silhouette noise.** ABS renders are noise-free; real
+   BodyM masks carry segmentation artifacts. Injecting holes / blur /
+   edge jitter into the ABS renders narrows the synthetic→real gap the
+   paper flags. Cheap; do alongside the first `--abs` run.
+5. **Limb crops for small girths.** Wrist and ankle occupy few pixels
+   in a full-body silhouette and are the worst measurements. A
+   two-stage crop-and-measure, or extra limb input streams, would help.
+6. **Uncertainty head.** Predict a per-measurement σ (Gaussian NLL) so
+   `refine_to_tape` can weight each girth by confidence and flag failed
+   captures.
+7. **Joint fit.** Replace the sequential BMnet → `refine_to_tape` step
+   with a single energy: betas chamfer to the front pointmap, match the
+   BMnet girths (weighted by the σ from item 6), and match both
+   silhouettes — no order dependence.

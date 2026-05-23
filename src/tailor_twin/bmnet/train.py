@@ -148,6 +148,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--abs-seed-sigma", type=float, default=1.0,
                    help="std of the random seed shapes before ascent")
     p.add_argument("--abs-gender", default="neutral")
+    p.add_argument("--from-checkpoint", type=Path, default=None,
+                   help="skip phase 1 by loading a pre-trained baseline "
+                        "checkpoint; meaningful with --abs (otherwise the "
+                        "script just re-saves the loaded checkpoint)")
     args = p.parse_args(argv)
 
     dev = _device(args.device)
@@ -177,48 +181,60 @@ def main(argv: list[str] | None = None) -> int:
     sw = std_t.to(dev)
 
     # ------------------------------------------------------------------
-    # phase 1 — supervised pre-training, 150k iterations (paper §5)
+    # phase 1 — supervised pre-training, 150k iterations (paper §5).
+    # Skipped when --from-checkpoint is set: we just load that baseline,
+    # seed `best` from its recorded val MAE, and copy it to args.out so
+    # phase 2's resume-load and the final report load both find a file.
     # ------------------------------------------------------------------
-    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
-    # Multi-step schedule stepped once per iteration; ×0.1 at 75 % / 88 %.
-    sched = torch.optim.lr_scheduler.MultiStepLR(
-        opt, milestones=[int(0.75 * args.iters), int(0.88 * args.iters)],
-        gamma=0.1)
-    iters_per_epoch = max(1, len(train_ld))
-    print(f"\n=== phase 1: {args.iters} iterations "
-          f"(~{args.iters / iters_per_epoch:.0f} epochs) ===")
+    if args.from_checkpoint is not None:
+        ck0 = torch.load(args.from_checkpoint, map_location=dev,
+                         weights_only=False)
+        model.load_state_dict(ck0["state_dict"])
+        best = float(ck0.get("val_mae_cm", float("inf")))
+        _save(args.out, model, std, args, best)
+        print(f"\n=== phase 1 skipped — loaded {args.from_checkpoint} "
+              f"(val {best:.2f} cm) ===")
+    else:
+        opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+        # Multi-step schedule stepped once per iteration; ×0.1 at 75 % / 88 %.
+        sched = torch.optim.lr_scheduler.MultiStepLR(
+            opt, milestones=[int(0.75 * args.iters), int(0.88 * args.iters)],
+            gamma=0.1)
+        iters_per_epoch = max(1, len(train_ld))
+        print(f"\n=== phase 1: {args.iters} iterations "
+              f"(~{args.iters / iters_per_epoch:.0f} epochs) ===")
 
-    best = float("inf")
-    it = 0
-    ep = 0
-    while it < args.iters:
-        ep += 1
-        t0 = time.time()
-        model.train()
-        run, n = 0.0, 0
-        for x, z in train_ld:
-            x, z = x.to(dev), z.to(dev)
-            opt.zero_grad()
-            pred = model(x)
-            loss = (torch.abs(pred - z) * sw).mean()
-            loss.backward()
-            opt.step()
-            sched.step()
-            run += loss.detach().item() * x.shape[0]
-            n += x.shape[0]
-            it += 1
-            if it >= args.iters:
-                break
-        train_mae = run / max(n, 1)
-        val_mae, _ = _evaluate(model, hold_ld, std_t, dev)
-        flag = ""
-        if val_mae < best:
-            best = val_mae
-            _save(args.out, model, std, args, val_mae)
-            flag = "  *saved"
-        print(f"ep {ep:3d}  it {it:6d}/{args.iters}  "
-              f"train {train_mae:5.2f}  val {val_mae:5.2f} cm  "
-              f"({time.time() - t0:4.0f}s){flag}")
+        best = float("inf")
+        it = 0
+        ep = 0
+        while it < args.iters:
+            ep += 1
+            t0 = time.time()
+            model.train()
+            run, n = 0.0, 0
+            for x, z in train_ld:
+                x, z = x.to(dev), z.to(dev)
+                opt.zero_grad()
+                pred = model(x)
+                loss = (torch.abs(pred - z) * sw).mean()
+                loss.backward()
+                opt.step()
+                sched.step()
+                run += loss.detach().item() * x.shape[0]
+                n += x.shape[0]
+                it += 1
+                if it >= args.iters:
+                    break
+            train_mae = run / max(n, 1)
+            val_mae, _ = _evaluate(model, hold_ld, std_t, dev)
+            flag = ""
+            if val_mae < best:
+                best = val_mae
+                _save(args.out, model, std, args, val_mae)
+                flag = "  *saved"
+            print(f"ep {ep:3d}  it {it:6d}/{args.iters}  "
+                  f"train {train_mae:5.2f}  val {val_mae:5.2f} cm  "
+                  f"({time.time() - t0:4.0f}s){flag}")
 
     # ------------------------------------------------------------------
     # phases 2 & 3 — adversarial body simulator (paper §3.2)

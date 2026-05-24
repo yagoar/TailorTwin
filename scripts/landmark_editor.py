@@ -52,6 +52,7 @@ MEASUREMENT_FIELDS = [
     ("bicep",      "L11", "cm"),
     ("thigh",      "M03", "cm"),
     ("knee_circ",  "M05", "cm"),
+    ("crotch_height", "M01", "cm"),
 ]
 
 

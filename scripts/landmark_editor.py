@@ -27,11 +27,15 @@ from flask import Flask, jsonify, render_template_string, request
 
 
 # Horizontal-line landmarks (Y level per view). Top-down anatomical order.
+# ``ground`` is the floor row under the heels — used by the overlay to
+# anchor the mesh's sole to the photo's actual floor pixel instead of
+# guessing from the silhouette bbox bottom (which lands on the heel
+# pixel, not the floor, when the foot is slightly lifted in the photo).
 Y_LANDMARKS = [
     "jawline", "neck", "shoulder", "armpit",
     "bust", "underbust",
     "waist", "highhip", "hip", "crotch",
-    "knee",
+    "knee", "ground",
 ]
 # Front-only point landmarks (X,Y per point)
 FRONT_POINTS = ["bust_apex_L", "bust_apex_R"]

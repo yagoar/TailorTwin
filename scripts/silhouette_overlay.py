@@ -16,6 +16,7 @@ Usage:
 """
 from __future__ import annotations
 import argparse
+import json
 from pathlib import Path
 
 import cv2
@@ -52,7 +53,8 @@ COL_WIRE     = (0,   230, 230)      # mesh edges = yellow
 def render_wire_over_sil(verts: np.ndarray, faces: np.ndarray,
                           view: str, sil_gray: np.ndarray,
                           img_h: int, img_w: int, scale: float,
-                          photo_xc: float, photo_yc: float) -> np.ndarray:
+                          photo_xc: float, photo_yc: float,
+                          floor_y: float | None = None) -> np.ndarray:
     """Project mesh, draw yellow wireframe over photo silhouette.
 
     Photo silhouette = gray. Mesh = yellow triangle edges (unique edges
@@ -67,8 +69,14 @@ def render_wire_over_sil(verts: np.ndarray, faces: np.ndarray,
     uv[:, 0] += photo_xc - x_mid
     # Anchor mesh bottom (heel/sole when feet are posed flat — see
     # main() which lifts canonical toe-down by rotating the ankles)
-    # to the photo silhouette bottom.
-    photo_y_bot = float(np.where(sil_gray > 0.5)[0].max())
+    # to the floor row in the photo. Use the ``ground`` landmark from
+    # the editor JSON when available (the actual floor line under
+    # the heels); otherwise fall back to the silhouette bbox bottom
+    # (lowest body pixel = the heel itself).
+    if floor_y is not None:
+        photo_y_bot = float(floor_y)
+    else:
+        photo_y_bot = float(np.where(sil_gray > 0.5)[0].max())
     mesh_y_bot = float(uv[:, 1].max())
     uv[:, 1] += photo_y_bot - mesh_y_bot
 
@@ -113,6 +121,12 @@ def main(argv=None):
                          "55 = clear A-pose).")
     ap.add_argument("--keep-pose", action="store_true",
                     help="Render in fitted pose instead of canonical A-pose.")
+    ap.add_argument("--landmarks", type=Path, default=None,
+                    help="JSON from scripts/landmark_editor.py — uses "
+                         "lines_y.ground.<view> as the floor row to "
+                         "anchor mesh heels to. Auto-discovers "
+                         "<out-prefix-base>_landmarks.json next to the "
+                         "out-prefix when not set.")
     args = ap.parse_args(argv)
 
     d = np.load(args.fit, allow_pickle=True)
@@ -179,15 +193,53 @@ def main(argv=None):
         ys = np.where(m > 0)[0]; return float(ys.max() - ys.min())
     fxc, fyc = torso_axis_x(front_mask), bbox_yc(front_mask)
     sxc, syc = bbox_xc(side_mask),       bbox_yc(side_mask)
-    scale_f = body_h_px(front_mask) / mesh_h_m
-    scale_s = body_h_px(side_mask)  / mesh_h_m
+    # Scale = photo body extent (silhouette TOP → floor line) / mesh
+    # height. When the ground landmark is supplied below the heels,
+    # photo extent grows accordingly so the mesh stretches to fill
+    # head_top → ground rather than head_top → heel.
+    fy_top = float(np.where(front_mask > 0)[0].min())
+    sy_top = float(np.where(side_mask  > 0)[0].min())
 
     fh, fw = front_mask.shape
     sh, sw = side_mask.shape
+
+    # Ground line per view from landmark JSON (lines_y.ground.<view> in
+    # ORIGINAL photo pixel coords; map onto the cropped/resized mask).
+    floor_f: float | None = None
+    floor_s: float | None = None
+    lm_path = args.landmarks
+    if lm_path is None:
+        guess = args.out_prefix.with_name(
+            args.out_prefix.name.split("_lm")[0] + "_landmarks.json")
+        if guess.exists():
+            lm_path = guess
+    if lm_path is not None and lm_path.exists():
+        data = json.loads(lm_path.read_text())
+        gnd = (data.get("lines_y") or {}).get("ground") or {}
+        def map_y(orig_y, mask_orig, mask_crop):
+            ys_o = np.where(mask_orig > 0)[0]
+            if not ys_o.size: return None
+            frac = (orig_y - ys_o.min()) / max(ys_o.max() - ys_o.min(), 1)
+            ys_c = np.where(mask_crop > 0)[0]
+            return float(ys_c.min() + frac * (ys_c.max() - ys_c.min()))
+        if gnd.get("front") is not None:
+            floor_f = map_y(gnd["front"], front_full, front_mask)
+        if gnd.get("side") is not None:
+            floor_s = map_y(gnd["side"],  side_full,  side_mask)
+        if floor_f is not None or floor_s is not None:
+            print(f"ground landmark: front={floor_f} side={floor_s}")
+
+    f_bot = floor_f if floor_f is not None else float(np.where(front_mask>0)[0].max())
+    s_bot = floor_s if floor_s is not None else float(np.where(side_mask >0)[0].max())
+    scale_f = (f_bot - fy_top) / mesh_h_m
+    scale_s = (s_bot - sy_top) / mesh_h_m
+
     f_img = render_wire_over_sil(verts, faces, "front", front_mask,
-                                  fh, fw, scale_f, fxc, fyc)
+                                  fh, fw, scale_f, fxc, fyc,
+                                  floor_y=floor_f)
     s_img = render_wire_over_sil(verts, faces, "side",  side_mask,
-                                  sh, sw, scale_s, sxc, syc)
+                                  sh, sw, scale_s, sxc, syc,
+                                  floor_y=floor_s)
     f_png = args.out_prefix.with_name(args.out_prefix.name + "_wire_front.png")
     s_png = args.out_prefix.with_name(args.out_prefix.name + "_wire_side.png")
     cv2.imwrite(str(f_png), f_img)

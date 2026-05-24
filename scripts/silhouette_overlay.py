@@ -65,13 +65,9 @@ def render_wire_over_sil(verts: np.ndarray, faces: np.ndarray,
     uv = project_view(v, view, img_h, img_w, s, zero, zero).numpy()
     x_mid = (uv[:, 0].max() + uv[:, 0].min()) / 2
     uv[:, 0] += photo_xc - x_mid
-    # Anchor the BOTTOM of the mesh (heels / soles) to the bottom of
-    # the photo silhouette. Bbox-center alignment puts the mesh too
-    # low because the SMPL-X canonical foot pose has toes pointing
-    # forward → mesh y_min is below the actual sole, so the projected
-    # body extent extends past the photo feet. Anchoring the bottom
-    # explicitly pins heels to heels; mesh head_top falls into place
-    # since the per-view scale already equates the two extents.
+    # Anchor mesh bottom (heel/sole when feet are posed flat — see
+    # main() which lifts canonical toe-down by rotating the ankles)
+    # to the photo silhouette bottom.
     photo_y_bot = float(np.where(sil_gray > 0.5)[0].max())
     mesh_y_bot = float(uv[:, 1].max())
     uv[:, 1] += photo_y_bot - mesh_y_bot
@@ -130,6 +126,16 @@ def main(argv=None):
         # — independent of the photo's arm/head orientation.
         body_pose = _build_a_pose(args.shoulder_deg).astype(np.float32)
         body_pose = body_pose.reshape(1, 63)
+    # Lift toes (ankle dorsiflexion) so the foot is flat. Canonical SMPL-X
+    # has toes pointing forward+down — toe tip ~2cm below the heel — so
+    # mesh y_min lands below the actual sole and the overlay's heel
+    # appears 2cm below the photo's floor row. Rotate L_Ankle (body_pose
+    # joint index 6) and R_Ankle (index 7) around the lateral X axis by
+    # ~6° to bring the sole flat to ground.
+    pose_view = body_pose.reshape(21, 3)
+    pose_view[6, 0] += 0.10   # L_Ankle dorsiflex
+    pose_view[7, 0] += 0.10   # R_Ankle dorsiflex
+    body_pose = pose_view.reshape(1, 63)
     bm = smplx.create(model_path="data/body_models", model_type="smplx",
                        gender=args.gender, num_betas=num_betas,
                        use_pca=False, flat_hand_mean=True, batch_size=1)

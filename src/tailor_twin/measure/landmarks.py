@@ -487,6 +487,12 @@ class LandmarkSet:
     # dynamic landmarks that call into recipe polylines, e.g. the SN→apex
     # ↔ G03 intersection used by H16)
     waist_y_override: float | None = None  # world-frame Y from string detection
+    y_overrides: dict[str, float] | None = None  # leaf -> world-frame Y.
+    # Generic per-landmark Y override. Applied AFTER waist_y_override and
+    # AFTER vertex/compound/dynamic resolution, so girth-slicing anchors
+    # like bust_level / lowbust_level / waist_string / high_hip_level /
+    # hip_level can be pinned to photo-derived heights from a manually
+    # placed landmark JSON (scripts/landmark_editor.py).
     gender: str = "female"  # affects landmarks like bust_level where the
     # female-tuned vertex IDs land at the wrong anatomical level on
     # male / neutral meshes; non-female falls back to anatomical searches.
@@ -505,6 +511,9 @@ class LandmarkSet:
                 and leaf in WAIST_VID_LANDMARKS):
             pt = pt.copy()
             pt[1] = float(self.waist_y_override)
+        if self.y_overrides and leaf in self.y_overrides:
+            pt = pt.copy()
+            pt[1] = float(self.y_overrides[leaf])
         return pt
 
     def _resolve(self, leaf: str) -> np.ndarray:
@@ -589,6 +598,7 @@ def build_landmark_set(
     joints: np.ndarray | None = None,
     faces: np.ndarray | None = None,
     waist_y_override: float | None = None,
+    y_overrides: dict[str, float] | None = None,
     gender: str = "female",
 ) -> LandmarkSet:
     """Construct a LandmarkSet from a fitted SMPL-X mesh + verified IDs.
@@ -611,6 +621,7 @@ def build_landmark_set(
         joints=joints,
         faces=faces,
         waist_y_override=waist_y_override,
+        y_overrides=y_overrides,
         gender=gender,
     )
 

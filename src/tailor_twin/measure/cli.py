@@ -33,6 +33,65 @@ from .seamly_extractor import extract_catalog
 BENT_ARM_CODES: tuple[str, ...] = ("L01", "L02", "L04")
 
 
+# Mapping from landmark-editor line names → SMPL-X anchor landmarks used by
+# the PlanarGirth recipes. Overriding the Y of each anchor pins the slice
+# plane (and downstream landmarks like waist_cf/cb/side) to the photo Y.
+_LM_TO_ANCHORS: dict[str, tuple[str, ...]] = {
+    "bust":      ("bust_level",),
+    "underbust": ("lowbust_level",),
+    "waist":     ("waist_string", "waist_cf", "waist_cb",
+                  "waist_side_left", "waist_side_right"),
+    "highhip":   ("high_hip_level",),
+    "hip":       ("hip_level",),
+}
+
+
+def _body_top_h(seg_path: Path) -> tuple[float, float]:
+    """Top Y + height (in px) of the body in a Sapiens part-seg map."""
+    seg = np.load(seg_path)
+    if seg.ndim == 3:
+        seg = (seg.argmax(0) if seg.shape[0] < seg.shape[-1]
+               else seg.argmax(-1))
+    ys = np.where(seg > 0)[0]
+    return float(ys.min()), float(ys.max() - ys.min())
+
+
+def _y_overrides_from_landmarks(
+    landmarks_json: Path, front_seg: Path, side_seg: Path,
+    smplx_verts: np.ndarray,
+) -> dict[str, float]:
+    """Convert photo-pixel landmark Y → world-frame mesh Y per anchor.
+
+    Each landmark line in the JSON is a fraction of the photo body bbox
+    (top-of-hair → toes). Map that same fraction onto the mesh's full
+    Y span (feet → scalp) to get the slice height to feed downstream.
+    """
+    data = json.loads(landmarks_json.read_text())
+    lines = data.get("lines_y") or {}
+    f_top, f_h = _body_top_h(front_seg)
+    s_top, s_h = _body_top_h(side_seg)
+    y_lo = float(smplx_verts[:, 1].min())
+    y_hi = float(smplx_verts[:, 1].max())
+    span = y_hi - y_lo
+
+    overrides: dict[str, float] = {}
+    for lm_name, anchors in _LM_TO_ANCHORS.items():
+        by_view = lines.get(lm_name) or {}
+        if not by_view:
+            continue
+        # Side preferred (cleaner profile, no arm clutter on body Y).
+        if by_view.get("side") is not None:
+            frac = (by_view["side"] - s_top) / s_h
+        elif by_view.get("front") is not None:
+            frac = (by_view["front"] - f_top) / f_h
+        else:
+            continue
+        mesh_y = y_lo + (1.0 - frac) * span
+        for a in anchors:
+            overrides[a] = mesh_y
+    return overrides
+
+
 def _print_table(values: dict, label: str = "seamly_code", unit: str = "cm") -> None:
     print(f"{label:<40} {'value (' + unit + ')':>10}")
     print("-" * 52)
@@ -106,6 +165,22 @@ def main(argv: list[str] | None = None) -> int:
              "fall through as A-pose values, which are incorrect).",
     )
     p.add_argument(
+        "--landmarks", type=Path, default=None,
+        help="JSON from scripts/landmark_editor.py — overrides the mesh-"
+             "derived Y of bust_level / lowbust_level / waist_string / "
+             "high_hip_level / hip_level so girths are sliced at the "
+             "photo-Y you actually placed in the editor.",
+    )
+    p.add_argument(
+        "--front-seg", type=Path, default=None,
+        help="Sapiens front_seg.npy — required with --landmarks to map "
+             "photo pixel Y → body-bbox fraction.",
+    )
+    p.add_argument(
+        "--side-seg", type=Path, default=None,
+        help="Sapiens side_seg.npy — required with --landmarks.",
+    )
+    p.add_argument(
         "--waist-y", type=float, default=None,
         help="World-frame Y (metres) of the detected waist-string elastic. "
              "Overrides the SMPL-X anatomical waist Y for every waist-"
@@ -145,6 +220,19 @@ def main(argv: list[str] | None = None) -> int:
     if waist_y_override is not None:
         print(f"waist-string Y override: {waist_y_override:.4f} m")
 
+    # Photo-derived per-girth Y overrides (from manual landmark editor).
+    y_overrides: dict[str, float] | None = None
+    if args.landmarks is not None:
+        if args.front_seg is None or args.side_seg is None:
+            raise SystemExit(
+                "--landmarks requires --front-seg AND --side-seg "
+                "(to map photo pixel Y → body fraction).")
+        y_overrides = _y_overrides_from_landmarks(
+            args.landmarks, args.front_seg, args.side_seg,
+            np.load(args.fit_npz)["smplx_vertices"])
+        print(f"landmark Y overrides: "
+              f"{ {k: round(v, 4) for k, v in y_overrides.items()} }")
+
     fit = np.load(args.fit_npz)
     verts = fit["smplx_vertices"].astype(np.float32)
     joints = (fit["smplx_joints"].astype(np.float32)
@@ -172,9 +260,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     faces = np.asarray(bm.faces, dtype=np.int32)
 
+    landmarks_set = build_landmark_set(
+        verts, joints=joints, faces=faces,
+        waist_y_override=waist_y_override, y_overrides=y_overrides,
+        gender=gender,
+    )
     cat = extract_catalog(verts, faces, joints=joints,
                           waist_y_override=waist_y_override,
-                          gender=gender)
+                          gender=gender, landmarks=landmarks_set)
     # Bent-arm override: L01/L02/L04 (and the L03 formula) need an
     # elbow-flexed mesh. Re-pose the SMPL-X body, recompute those
     # codes on the bent verts, then overwrite the A-pose values.
@@ -188,7 +281,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             bent_landmarks = build_landmark_set(
                 pose.verts, joints=pose.joints, faces=faces,
-                waist_y_override=waist_y_override, gender=gender,
+                waist_y_override=waist_y_override,
+                y_overrides=y_overrides, gender=gender,
             )
             for code in BENT_ARM_CODES:
                 try:

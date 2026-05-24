@@ -126,8 +126,11 @@ def main(argv=None):
     front_mask = crop_aspect_free(front_full, args.img_h)
     side_mask  = crop_aspect_free(side_full,  args.img_h)
 
-    body_h_m = args.height / 100.0
-    scale = args.img_h * 0.88 / body_h_m
+    # Per-view scale: anchor mesh body extent to photo body bbox in the
+    # cropped image. Uses MESH actual height (not user-input height) so
+    # the rendered mesh fills the photo silhouette 1:1 vertically — no
+    # scale-formula vs crop-margin mismatch, no shrink from height drift.
+    mesh_h_m = float(verts[:, 1].max() - verts[:, 1].min())
 
     def bbox_yc(m):
         ys = np.where(m > 0)[0]; return float((ys.min() + ys.max()) / 2)
@@ -145,15 +148,19 @@ def main(argv=None):
                 xs_r = np.where(r > 0)[0]
                 centers.append((xs_r.min() + xs_r.max()) / 2)
         return float(np.median(centers)) if centers else bbox_xc(m)
+    def body_h_px(m):
+        ys = np.where(m > 0)[0]; return float(ys.max() - ys.min())
     fxc, fyc = torso_axis_x(front_mask), bbox_yc(front_mask)
     sxc, syc = bbox_xc(side_mask),       bbox_yc(side_mask)
+    scale_f = body_h_px(front_mask) / mesh_h_m
+    scale_s = body_h_px(side_mask)  / mesh_h_m
 
     fh, fw = front_mask.shape
     sh, sw = side_mask.shape
     f_img = render_wire_over_sil(verts, faces, "front", front_mask,
-                                  fh, fw, scale, fxc, fyc)
+                                  fh, fw, scale_f, fxc, fyc)
     s_img = render_wire_over_sil(verts, faces, "side",  side_mask,
-                                  sh, sw, scale, sxc, syc)
+                                  sh, sw, scale_s, sxc, syc)
     f_png = args.out_prefix.with_name(args.out_prefix.name + "_wire_front.png")
     s_png = args.out_prefix.with_name(args.out_prefix.name + "_wire_side.png")
     cv2.imwrite(str(f_png), f_img)

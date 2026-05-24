@@ -85,13 +85,18 @@ class AnnyFitter:
         def vmask(predicate):
             return np.array([predicate(labels[b]) for b in self.dom_bone])
         ARM_KEYS = ("upperarm", "lowerarm", "wrist", "hand", "thumb",
-                     "index", "middle", "ring", "pinky")
+                     "index", "middle", "ring", "pinky", "finger",
+                     "metacarpal", "knuckle")
         LEG_KEYS = ("upperleg", "lowerleg", "foot", "toe")
-        # No-arms: drop only arm/hand/finger bones. Keep legs so hip/glute
-        # slice catches the full hip circumference. Used for torso tapes
-        # (bust through hip).
+        # No-arms: drop arm/hand/finger bones AND clavicles (shoulder
+        # bones — their verts sit at neck level and bloat the neck
+        # slice). Keep legs so hip/glute slice catches the full hip
+        # circumference. Used for torso tapes (bust through hip).
         self.mask_no_arms = vmask(lambda l: not any(
-            k in l.lower() for k in ARM_KEYS))
+            k in l.lower() for k in ARM_KEYS + ("clavicle",)))
+        # Neck-only mask: drop clavicles + arms + spine below upper-back.
+        self.mask_neck = vmask(lambda l: any(
+            k in l.lower() for k in ("neck", "spine04", "spine05")))
         # Single leg/arm for limb-perpendicular slicing (after A-pose puts
         # the limb roughly vertical → horizontal slice = perpendicular).
         self.mask_leg_l = vmask(lambda l: any(
@@ -109,8 +114,10 @@ class AnnyFitter:
             T[:3, :3] = [[c, 0, s], [0, 1, 0], [-s, 0, c]]
             return torch.from_numpy(T)[None]
         self.a_pose = {}
-        if "upperarm01.L" in labels: self.a_pose["upperarm01.L"] = rot_y(60.0)
-        if "upperarm01.R" in labels: self.a_pose["upperarm01.R"] = rot_y(-60.0)
+        # Arms STRAIGHT down (90°) so a horizontal Z-slice through the
+        # upper arm gives a circumference, not a diagonal cross-section.
+        if "upperarm01.L" in labels: self.a_pose["upperarm01.L"] = rot_y(90.0)
+        if "upperarm01.R" in labels: self.a_pose["upperarm01.R"] = rot_y(-90.0)
         if "upperleg01.L" in labels: self.a_pose["upperleg01.L"] = rot_y(-7.0)
         if "upperleg01.R" in labels: self.a_pose["upperleg01.R"] = rot_y(7.0)
 
@@ -129,6 +136,11 @@ class AnnyFitter:
 
     def anth_mass_kg(self) -> float:
         return self.anth.mass(self._forward()["vertices"])[0].item()
+
+    def anth_waist_cm(self) -> float:
+        # Anny's exact waist polyline measurement.
+        return self.anth.waist_circumference(
+            self._forward()["rest_vertices"])[0].item() * 100.0
 
     def verts(self) -> np.ndarray:
         return self._forward()["vertices"][0].cpu().numpy()
@@ -156,6 +168,7 @@ class AnnyFitter:
         if region == "torso":   sel = self.mask_no_arms & band
         elif region == "leg_l": sel = self.mask_leg_l & band
         elif region == "arm_l": sel = self.mask_arm_l & band
+        elif region == "neck":  sel = self.mask_neck & band
         else:                   sel = band
         if sel.sum() < 6:
             return 0.0
@@ -181,7 +194,7 @@ TAPE_PLAN = [
     ("bicep",     "measure-upperarm-circ-incr",  "arm_l", 0.25),
     ("thigh",     "measure-thigh-circ-incr",     "leg_l", 0.55),
     ("knee",      "measure-knee-circ-incr",      "leg_l", 0.74),
-    ("neck",      "measure-neck-circ-incr",      "torso", 0.16),
+    ("neck",      "measure-neck-circ-incr",      "neck",  0.16),
 ]
 # y_frac is from HEAD top (0) to FEET (1) — convert to feet-up via 1-y.
 
@@ -262,13 +275,22 @@ def main(argv=None):
         y_frac_from_feet = 1.0 - y_frac_from_top
         baseline = f.girth_at_y(y_frac_from_feet, region=region)
 
-        def g(coef, key=blendshape, yf=y_frac_from_feet, reg=region):
-            f.lc[key] = coef
-            return f.girth_at_y(yf, region=reg)
+        # Waist uses Anny's exact polyline measurement; others use slice.
+        if lm_key == "waist":
+            def g(coef, key=blendshape):
+                f.lc[key] = coef
+                return f.anth_waist_cm()
+            baseline = f.anth_waist_cm()
+        else:
+            def g(coef, key=blendshape, yf=y_frac_from_feet, reg=region):
+                f.lc[key] = coef
+                return f.girth_at_y(yf, region=reg)
+            baseline = f.girth_at_y(y_frac_from_feet, region=region)
 
         coef = bisect(g, -1.5, 1.5, target=target_cm, tol=0.1)
         f.lc[blendshape] = coef
-        final = f.girth_at_y(y_frac_from_feet, region=region)
+        final = (f.anth_waist_cm() if lm_key == "waist"
+                  else f.girth_at_y(y_frac_from_feet, region=region))
         print(f"  {lm_key:10}  {target_cm:>7.1f}  {baseline:>8.1f}  "
               f"{coef:>+6.2f}  {final:>7.1f}")
 

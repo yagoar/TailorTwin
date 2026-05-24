@@ -24,6 +24,7 @@ import torch
 import smplx
 
 from silhouette_optimize import load_torso, project_view
+from tailor_twin.fit.refine_to_tape import _build_a_pose
 
 
 def crop_aspect_free(mask: np.ndarray, target_h: int,
@@ -103,12 +104,24 @@ def main(argv=None):
     ap.add_argument("--img-h",  type=int, default=1600,
                     help="Render height; taller = finer wireframe. Width "
                          "is derived per-view from the body aspect.")
+    ap.add_argument("--shoulder-deg", type=float, default=55.0,
+                    help="A-pose shoulder drop angle (0 = T-pose, "
+                         "55 = clear A-pose).")
+    ap.add_argument("--keep-pose", action="store_true",
+                    help="Render in fitted pose instead of canonical A-pose.")
     args = ap.parse_args(argv)
 
     d = np.load(args.fit, allow_pickle=True)
     betas = d["betas"].astype(np.float32)
-    body_pose = d["body_pose"].astype(np.float32).reshape(1, 63)
     num_betas = len(betas)
+    if args.keep_pose:
+        body_pose = d["body_pose"].astype(np.float32).reshape(1, 63)
+    else:
+        # Canonical A-pose: shoulders dropped, head/neck/spine neutral so
+        # the overlay shows body proportions in a clean reference pose
+        # — independent of the photo's arm/head orientation.
+        body_pose = _build_a_pose(args.shoulder_deg).astype(np.float32)
+        body_pose = body_pose.reshape(1, 63)
     bm = smplx.create(model_path="data/body_models", model_type="smplx",
                        gender=args.gender, num_betas=num_betas,
                        use_pca=False, flat_hand_mean=True, batch_size=1)

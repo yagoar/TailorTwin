@@ -64,9 +64,17 @@ def render_wire_over_sil(verts: np.ndarray, faces: np.ndarray,
     zero = torch.tensor(0.0)
     uv = project_view(v, view, img_h, img_w, s, zero, zero).numpy()
     x_mid = (uv[:, 0].max() + uv[:, 0].min()) / 2
-    y_mid = (uv[:, 1].max() + uv[:, 1].min()) / 2
     uv[:, 0] += photo_xc - x_mid
-    uv[:, 1] += photo_yc - y_mid
+    # Anchor the BOTTOM of the mesh (heels / soles) to the bottom of
+    # the photo silhouette. Bbox-center alignment puts the mesh too
+    # low because the SMPL-X canonical foot pose has toes pointing
+    # forward → mesh y_min is below the actual sole, so the projected
+    # body extent extends past the photo feet. Anchoring the bottom
+    # explicitly pins heels to heels; mesh head_top falls into place
+    # since the per-view scale already equates the two extents.
+    photo_y_bot = float(np.where(sil_gray > 0.5)[0].max())
+    mesh_y_bot = float(uv[:, 1].max())
+    uv[:, 1] += photo_y_bot - mesh_y_bot
 
     # Mesh fill mask — used only to mark red (sil ∖ mesh)
     mesh_mask = np.zeros((img_h, img_w), dtype=np.uint8)

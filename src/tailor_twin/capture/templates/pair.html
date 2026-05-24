@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>TailorTwin Paired Capture</title>
+<style>
+  :root {
+    --bg:#f4f4f7; --bg-card:#fff; --ink:#0b0b0f; --ink-soft:#494955;
+    --line:#ececf1; --line-2:#d8d8e0; --accent:#6f5cf6;
+    --ok:#10b981; --err:#ef4444;
+    --shadow:0 1px 2px rgba(11,11,15,.04), 0 12px 30px -10px rgba(11,11,15,.10);
+    --radius:16px; --radius-sm:10px; color-scheme:light;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  body { background:var(--bg); color:var(--ink); height:100vh; overflow:hidden;
+         font:14px/1.5 "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  .hidden { display:none !important; }
+  .panel { position:fixed; inset:0; display:flex; flex-direction:column;
+           align-items:center; overflow-y:auto; padding:24px; background:var(--bg);
+           text-align:center; }
+  .card { background:var(--bg-card); border:1px solid var(--line);
+          border-radius:var(--radius); box-shadow:var(--shadow);
+          padding:26px 24px; width:100%; max-width:360px; margin:auto;
+          display:flex; flex-direction:column; gap:14px; }
+  h1 { font-family:"Space Grotesk","Inter",sans-serif; font-weight:600; font-size:21px; }
+  p.sub { color:var(--ink-soft); font-size:13px; }
+  label { color:var(--ink-soft); font-weight:500; font-size:13px;
+          text-align:left; margin-bottom:-8px; }
+  input[type=number], select { width:100%; padding:10px 12px;
+        border:1px solid var(--line-2); border-radius:var(--radius-sm);
+        background:#fff; font:inherit; color:var(--ink); }
+  button { font:inherit; font-weight:500; padding:10px 18px; cursor:pointer;
+           border-radius:var(--radius-sm); border:1px solid var(--line-2);
+           background:#fff; color:var(--ink); transition:all .15s ease; }
+  button.primary { background:linear-gradient(135deg,#8b7dff,#6f5cf6 50%,#5b46e8);
+           color:#fff; border-color:transparent; padding:12px 22px;
+           box-shadow:0 4px 14px -4px rgba(111,92,246,.55); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .roles { display:flex; gap:10px; }
+  .roles button { flex:1; padding:16px 8px; font-weight:600; }
+  .roles button.sel { border-color:var(--accent); background:#efeaff;
+           color:#4c3fc0; }
+  .err { color:var(--err); font-size:13px; }
+
+  #p-live { padding:0; background:#000; }
+  video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#000; }
+  #pose { position:absolute; inset:0; width:100%; height:100%;
+          object-fit:contain; opacity:.34; pointer-events:none; }
+  #pose.mirror { transform:scaleX(-1); }
+  #hud { position:absolute; top:0; left:0; right:0; padding:14px 16px 26px;
+         background:linear-gradient(#000c,#0000); color:#fff; }
+  #role { font-family:"Space Grotesk","Inter",sans-serif; font-weight:600;
+          font-size:13px; letter-spacing:.12em; text-transform:uppercase; }
+  #tip { color:#d2d2d6; font-size:13px; margin-top:4px; }
+  #level { position:absolute; top:78px; left:50%; transform:translateX(-50%);
+           display:flex; align-items:center; gap:9px; padding:9px 16px;
+           border-radius:999px; font-weight:500; font-size:14px; color:#fff;
+           white-space:nowrap; background:rgba(20,20,26,.82); }
+  #level.ok { background:rgba(16,185,129,.92); }
+  #count { position:absolute; inset:0; display:flex; align-items:center;
+           justify-content:center; font-size:130px; font-weight:700; color:#fff;
+           text-shadow:0 2px 24px #000; }
+  #status { position:absolute; bottom:96px; left:0; right:0; padding:0 18px;
+            color:#fff; font-size:15px; text-align:center;
+            text-shadow:0 1px 6px #000; }
+  #shutterwrap { position:absolute; bottom:0; left:0; right:0; padding:18px 0 34px;
+            display:flex; justify-content:center;
+            background:linear-gradient(#0000,#000c); }
+  #shutter { width:74px; height:74px; border-radius:50%; background:#fff;
+             border:5px solid var(--accent); }
+  #shutter:disabled { border-color:#777; background:#9a9a9a; opacity:.6; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- 1. role + (front only) metadata -->
+  <div class="panel" id="p-intro">
+    <div class="card">
+      <h1>TailorTwin · Paired Capture</h1>
+      <p class="sub">Two phones, one instant. Put one phone facing the
+         subject (front), one at a true 90° to the side. Pick this
+         phone's role.</p>
+      <div class="roles">
+        <button id="r-front">Front camera</button>
+        <button id="r-side">Side camera</button>
+      </div>
+      <div id="meta" class="hidden" style="display:flex;flex-direction:column;gap:14px">
+        <label for="gender">Gender</label>
+        <select id="gender">
+          <option value="" selected disabled>select…</option>
+          <option value="female">Female</option>
+          <option value="male">Male</option>
+          <option value="neutral">Prefer not to say</option>
+        </select>
+        <label for="height">Height (cm)</label>
+        <input type="number" id="height" inputmode="decimal" placeholder="e.g. 170">
+        <label for="weight">Weight (kg)</label>
+        <input type="number" id="weight" inputmode="decimal" placeholder="e.g. 65">
+      </div>
+      <button class="primary" id="join" disabled>Join session</button>
+      <p class="err" id="introErr"></p>
+    </div>
+  </div>
+
+  <!-- 2. live -->
+  <div class="panel hidden" id="p-live">
+    <video id="video" playsinline muted autoplay></video>
+    <img id="pose">
+    <div id="hud">
+      <div id="role">Front camera</div>
+      <div id="tip">Prop the phone vertical. Subject fills the outline.</div>
+    </div>
+    <div id="level"><span id="arrow">•</span><span id="levelmsg">checking…</span></div>
+    <div id="count" class="hidden"></div>
+    <div id="status">connecting…</div>
+    <div id="shutterwrap"><button id="shutter" disabled></button></div>
+  </div>
+
+  <!-- 3. done -->
+  <div class="panel hidden" id="p-done">
+    <div class="card">
+      <h1>✓ Captured</h1>
+      <p class="sub" id="doneMsg">Both views saved. You can close this page.</p>
+      <button class="primary" id="again">New capture</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const TOL = 2, TOL_REL = 3.5;       // gyro level tolerance / hysteresis
+
+let role = null, stream = null;
+let pitch = 99, roll = 99, levelState = false, lastReady = null;
+let grabbed = false, polling = false;
+
+/* ---------- role + join ---------- */
+$("r-front").onclick = () => selRole("front");
+$("r-side").onclick  = () => selRole("side");
+function selRole(r) {
+  role = r;
+  $("r-front").classList.toggle("sel", r === "front");
+  $("r-side").classList.toggle("sel", r === "side");
+  $("meta").classList.toggle("hidden", r !== "front");
+  $("join").disabled = false;
+}
+$("join").onclick = async () => {
+  const fd = new FormData();
+  fd.append("role", role);
+  if (role === "front") {
+    const h = parseFloat($("height").value), w = parseFloat($("weight").value);
+    const g = $("gender").value;
+    if (!g)                   { $("introErr").textContent = "select a gender"; return; }
+    if (!(h > 80 && h < 230)) { $("introErr").textContent = "enter a valid height"; return; }
+    if (!(w > 25 && w < 300)) { $("introErr").textContent = "enter a valid weight"; return; }
+    fd.append("height_cm", h); fd.append("weight_kg", w); fd.append("gender", g);
+  }
+  try { await requestMotion(); await openCamera(); }
+  catch (e) { $("introErr").textContent = "camera/sensor blocked: " + e.message; return; }
+  try { await fetch("/sync/join", { method: "POST", body: fd }); }
+  catch (e) { $("introErr").textContent = "server unreachable"; return; }
+  $("p-intro").classList.add("hidden");
+  $("p-live").classList.remove("hidden");
+  $("role").textContent = role === "front" ? "Front camera" : "Side camera";
+  // side guide is the 90° silhouette; front guide for the front phone.
+  $("pose").src = role === "front" ? "/static/pose_front.png"
+                                   : "/static/pose_side_apose.png";
+  pollLoop();
+};
+
+/* ---------- tilt sensing (gravity vector — no gimbal lock at vertical) */
+async function requestMotion() {
+  const D = window.DeviceMotionEvent;
+  if (D && typeof D.requestPermission === "function") {
+    const r = await D.requestPermission();
+    if (r !== "granted") throw new Error("motion sensor denied");
+  }
+  window.addEventListener("devicemotion", onMotion);
+}
+function onMotion(e) {
+  const g = e.accelerationIncludingGravity;
+  if (!g || g.x == null) return;
+  const rad = 180 / Math.PI;
+  const rRoll  = Math.atan2(g.x, -g.y) * rad;
+  const rPitch = Math.atan2(g.z, -g.y) * rad;
+  const a = 0.25;
+  roll  = roll  > 90 ? rRoll  : roll  + a * (rRoll  - roll);
+  pitch = pitch > 90 ? rPitch : pitch + a * (rPitch - pitch);
+  updateLevel();
+}
+function updateLevel() {
+  const worst = Math.max(Math.abs(roll), Math.abs(pitch));
+  levelState = levelState ? worst < TOL_REL : worst < TOL;
+  const lv = $("level"), arrow = $("arrow"), msg = $("levelmsg");
+  if (levelState) {
+    lv.classList.add("ok"); arrow.textContent = "✓";
+    msg.textContent = "phone upright";
+  } else {
+    lv.classList.remove("ok");
+    if (Math.abs(pitch) >= Math.abs(roll)) {
+      if (pitch < 0) { arrow.textContent = "↓"; msg.textContent = "tilt top toward you"; }
+      else           { arrow.textContent = "↑"; msg.textContent = "tilt top away"; }
+    } else {
+      if (roll > 0)  { arrow.textContent = "↺"; msg.textContent = "rotate left"; }
+      else           { arrow.textContent = "↻"; msg.textContent = "rotate right"; }
+    }
+  }
+  reportReady();
+}
+
+/* ---------- camera ---------- */
+async function openCamera() {
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment", width: { ideal: 1440 }, height: { ideal: 2560 } },
+    audio: false,
+  });
+  $("video").srcObject = stream;
+}
+
+/* ---------- sync ---------- */
+/* The phone reports "ready" (propped upright) to the server. When BOTH
+   phones are ready the server arms a shared absolute fire time; both
+   phones poll it and grab together — one rigid body instant, no drift. */
+async function reportReady() {
+  if (levelState === lastReady) return;
+  lastReady = levelState;
+  const fd = new FormData();
+  fd.append("role", role);
+  fd.append("ready", levelState ? "1" : "0");
+  try { await fetch("/sync/ready", { method: "POST", body: fd }); } catch (e) {}
+}
+async function pollLoop() {
+  if (polling) return;
+  polling = true;
+  while (true) {
+    let s;
+    try { s = await (await fetch("/sync/state")).json(); }
+    catch (e) { await sleep(300); continue; }
+    handleState(s);
+    if (grabbed && s.uploaded.front && s.uploaded.side) {
+      $("p-live").classList.add("hidden");
+      $("p-done").classList.remove("hidden");
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      return;
+    }
+    await sleep(grabbed ? 400 : 200);
+  }
+}
+function handleState(s) {
+  const other = role === "front" ? "side" : "front";
+  const sh = $("shutter");
+  if (grabbed) {
+    $("status").textContent = "captured — waiting for the other phone…";
+    sh.disabled = true;
+    return;
+  }
+  if (s.fire_in_ms != null) {
+    const secs = Math.max(0, Math.ceil(s.fire_in_ms / 1000));
+    $("count").classList.remove("hidden");
+    $("count").textContent = secs;
+    $("status").textContent = "hold still — capturing together";
+    sh.disabled = true;
+    // Grab once the shared fire time arrives (within one poll interval).
+    if (s.fire_in_ms <= 150) { $("count").classList.add("hidden"); grab(); }
+    return;
+  }
+  $("count").classList.add("hidden");
+  // The shutter unlocks only when BOTH phones are joined and upright —
+  // either device may then tap it to start the shared countdown.
+  const bothReady = s.joined.front && s.joined.side
+                    && s.ready.front && s.ready.side;
+  sh.disabled = !bothReady;
+  if (!s.joined[other]) $("status").textContent = "waiting for the " + other + " phone to join…";
+  else if (!levelState) $("status").textContent = "prop this phone upright";
+  else if (!s.ready[other]) $("status").textContent = "you're ready — waiting for the " + other + " phone…";
+  else $("status").textContent = "both ready — tap the shutter (either phone)";
+}
+$("shutter").onclick = async () => {
+  $("shutter").disabled = true;
+  try { await fetch("/sync/trigger", { method: "POST" }); } catch (e) {}
+};
+
+/* ---------- grab + upload ---------- */
+function grab() {
+  if (grabbed) return;
+  grabbed = true;
+  const v = $("video");
+  const vw = v.videoWidth, vh = v.videoHeight;
+  const VW = innerWidth, VH = innerHeight;
+  const scale = Math.max(VW / vw, VH / vh);
+  const sw = Math.min(vw, Math.round(VW / scale));
+  const sh = Math.min(vh, Math.round(VH / scale));
+  const sx = Math.round((vw - sw) / 2), sy = Math.round((vh - sh) / 2);
+  const c = document.createElement("canvas");
+  c.width = sw; c.height = sh;
+  c.getContext("2d").drawImage(v, sx, sy, sw, sh, 0, 0, sw, sh);
+  c.toBlob(upload, "image/jpeg", 0.95);
+}
+async function upload(blob) {
+  const fd = new FormData();
+  fd.append("role", role);
+  fd.append("shot", blob, role + ".jpg");
+  fd.append("meta", JSON.stringify({ [role]: { pitch, roll } }));
+  $("status").textContent = "uploading…";
+  try {
+    const j = await (await fetch("/pair_upload", { method: "POST", body: fd })).json();
+    $("doneMsg").textContent = "Saved to " + j.saved + ". You can close this page.";
+  } catch (e) { $("status").textContent = "upload failed: " + e.message; }
+}
+/* New capture — clear the server session and reload so both phones
+   re-pair from scratch. */
+$("again").onclick = async () => {
+  $("again").disabled = true;
+  try { await fetch("/sync/reset", { method: "POST" }); } catch (e) {}
+  location.reload();
+};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+</script>
+</body>
+</html>

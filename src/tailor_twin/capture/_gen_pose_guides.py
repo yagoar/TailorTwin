@@ -110,10 +110,20 @@ def main() -> int:
         model_folder=model_folder, gender="neutral")
     side = _render_silhouette(verts_for(78.0), faces, axis_x=2,
                               flip_x=True, keep_verts=side_keep)
+
+    # Paired-capture side guide: the subject poses ONCE and both phones
+    # fire, so the side guide must show the SAME A-pose as the front
+    # (58°), not the 4-shot arms-down pose. Arms are still dropped from
+    # the render so the hand doesn't poke the profile — the subject
+    # aligns the torso/legs and holds the arms out per the front phone.
+    side_apose = _render_silhouette(verts_for(58.0), faces, axis_x=2,
+                                    flip_x=True, keep_verts=side_keep)
     cv2.imwrite(str(static / "pose_front.png"), front)
     cv2.imwrite(str(static / "pose_side.png"), side)
+    cv2.imwrite(str(static / "pose_side_apose.png"), side_apose)
     print(f"wrote {static/'pose_front.png'}  {front.shape}")
     print(f"wrote {static/'pose_side.png'}  {side.shape}")
+    print(f"wrote {static/'pose_side_apose.png'}  {side_apose.shape}")
     return 0
 
 

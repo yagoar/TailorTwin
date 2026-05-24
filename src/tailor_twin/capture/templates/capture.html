@@ -22,11 +22,11 @@
 
   /* form panels — light, card-based, matches the GUI */
   .panel { position:fixed; inset:0; display:flex; flex-direction:column;
-           align-items:center; justify-content:center; padding:24px;
+           align-items:center; overflow-y:auto; padding:24px;
            background:var(--bg); text-align:center; }
   .card { background:var(--bg-card); border:1px solid var(--line);
           border-radius:var(--radius); box-shadow:var(--shadow);
-          padding:26px 24px; width:100%; max-width:360px;
+          padding:26px 24px; width:100%; max-width:360px; margin:auto;
           display:flex; flex-direction:column; gap:14px; }
   h1 { font-family:"Space Grotesk","Inter",sans-serif; font-weight:600;
        font-size:21px; }
@@ -50,15 +50,20 @@
   /* live camera view — necessarily dark */
   #p-live { padding:0; background:#000; }
   video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#000; }
-  #frame { position:absolute; border:2.5px dashed #ffffff88; border-radius:var(--radius); }
+  #frame { position:absolute; border:6px solid #6f5cf6;
+           border-radius:var(--radius);
+           box-shadow:0 0 0 2px rgba(0,0,0,.55), 0 0 22px rgba(111,92,246,.7); }
   #pose { position:absolute; inset:0; width:100%; height:100%;
           object-fit:contain; opacity:.34; pointer-events:none; }
+  #pose.mirror { transform:scaleX(-1); }
 
   #hud { position:absolute; top:0; left:0; right:0; padding:14px 16px 26px;
          background:linear-gradient(#000c,#0000); color:#fff; }
   #step { font-family:"Space Grotesk","Inter",sans-serif; font-weight:600;
           font-size:13px; letter-spacing:.12em; text-transform:uppercase; }
   #tip  { color:#d2d2d6; font-size:13px; margin-top:4px; }
+  #tip.ok  { color:#34d399; font-weight:500; }
+  #tip.bad { color:#fca5a5; font-weight:500; }
 
   #level { position:absolute; top:78px; left:50%; transform:translateX(-50%);
            display:flex; align-items:center; gap:9px; padding:9px 16px;
@@ -80,9 +85,31 @@
            justify-content:center; font-size:130px; font-weight:700; color:#fff;
            text-shadow:0 2px 24px #000; }
 
-  .thumbs { display:flex; gap:14px; justify-content:center; }
+  /* Sapiens pose-gate overlay */
+  #verify { position:absolute; inset:0; display:flex; align-items:center;
+            justify-content:center; padding:24px;
+            background:rgba(8,8,12,.72);
+            -webkit-backdrop-filter:blur(4px); backdrop-filter:blur(4px); }
+  #verifyCard { background:var(--bg-card); border-radius:var(--radius);
+            box-shadow:var(--shadow); padding:22px 22px; width:100%;
+            max-width:340px; text-align:center;
+            display:flex; flex-direction:column; gap:12px; }
+  #verifyMsg { font-family:"Space Grotesk","Inter",sans-serif;
+            font-weight:600; font-size:17px; }
+  #verifyMsg.ok { color:var(--ok); }
+  #verifyMsg.bad { color:var(--err); }
+  #verifyIssues { list-style:none; display:flex; flex-direction:column;
+            gap:7px; }
+  #verifyIssues li { background:var(--accent-soft); color:var(--accent-ink);
+            border-radius:var(--radius-sm); padding:9px 12px; font-size:13px; }
+  #verifySpin { width:30px; height:30px; margin:4px auto; border-radius:50%;
+            border:3px solid var(--line-2); border-top-color:var(--accent);
+            animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  .thumbs { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
   .thumbs figure { font-size:12px; color:var(--ink-soft); }
-  .thumbs img { width:116px; height:164px; object-fit:cover; display:block;
+  .thumbs img { width:138px; height:196px; object-fit:cover; display:block;
                 border-radius:var(--radius-sm); border:1px solid var(--line-2);
                 margin-bottom:5px; }
   .row { display:flex; gap:10px; justify-content:center; }
@@ -95,8 +122,9 @@
   <div class="panel" id="p-intro">
     <div class="card">
       <h1>TailorTwin Capture</h1>
-      <p class="sub">Two photos — front, then side. Tight clothing, plain wall,
-         phone propped vertically ~3&nbsp;m away. Match the on-screen outline.</p>
+      <p class="sub">Four photos — front, back, left, right. Tight clothing,
+         plain wall, phone propped vertically ~3&nbsp;m away. Match the
+         on-screen outline; turn between shots.</p>
       <label for="gender">Gender</label>
       <select id="gender">
         <option value="" selected disabled>select…</option>
@@ -127,6 +155,15 @@
 
     <div id="count" class="hidden"></div>
 
+    <div id="verify" class="hidden">
+      <div id="verifyCard">
+        <div id="verifySpin"></div>
+        <div id="verifyMsg">Checking pose…</div>
+        <ul id="verifyIssues"></ul>
+        <button id="verifyRetake" class="primary hidden">Retake</button>
+      </div>
+    </div>
+
     <div id="ctrls">
       <button id="flip">Flip</button>
       <button id="shutter" disabled></button>
@@ -140,7 +177,9 @@
       <h1>Review</h1>
       <div class="thumbs">
         <figure><img id="t-front">front</figure>
-        <figure><img id="t-side">side</figure>
+        <figure><img id="t-back">back</figure>
+        <figure><img id="t-left">left</figure>
+        <figure><img id="t-right">right</figure>
       </div>
       <div class="row">
         <button id="redo">Retake</button>
@@ -160,20 +199,33 @@
 
 </div>
 
-<script>
+<script type="module">
 "use strict";
 const $ = id => document.getElementById(id);
 const TOL = 2;             // degrees from vertical that still counts as level
 const TOL_REL = 3.5;       // hysteresis: must exceed this to drop out of level
-const COUNTDOWN = 4;       // seconds before a shot
+const COUNTDOWN = 4;        // seconds before a shot (rear camera)
+const COUNTDOWN_SELFIE = 10;// longer for the selfie cam — time to get back
 const MOVE_TOL = 3;        // °: phone movement during countdown that aborts
 const FRAME_ASPECT = 0.60; // guide frame w/h — same for front and side
 
 let stream = null, facing = "environment";
 let pitch = 99, roll = 99, levelState = false;   // degrees from vertical
 let stepIdx = 0;
-const shots = [null, null], shotMeta = [null, null];
-const POSE_SRC = ["/static/pose_front.png", "/static/pose_side.png"];
+/* Four views — full 360° coverage so the body fit measures every side,
+   not a prior-guessed back. */
+const VIEWS = ["front", "back", "left", "right"];
+const shots = [null, null, null, null];
+const shotMeta = [null, null, null, null];
+const POSE_SRC = ["/static/pose_front.png", "/static/pose_front.png",
+                  "/static/pose_side.png", "/static/pose_side.png"];
+const STEP_LABEL = ["Front", "Back", "Left side", "Right side"];
+const STEP_TIP = [
+  "Face the camera, arms a little out, fill the outline.",
+  "Back to the camera, same stance, fill the outline.",
+  "Left side to the camera, arms down, a true 90° turn.",
+  "Right side to the camera, arms down, a true 90° turn.",
+];
 
 /* ---------- intro ---------- */
 $("start").onclick = async () => {
@@ -261,7 +313,80 @@ async function openCamera() {
 $("flip").onclick = async () => {
   facing = facing === "environment" ? "user" : "environment";
   try { await openCamera(); } catch (e) {}
+  if (facing === "user") {           // selfie — no live gate, show static tip
+    $("tip").textContent = STEP_TIP[stepIdx];
+    $("tip").className = "";
+  }
+  refreshShutter();
 };
+
+/* ---------- live pose check (in-browser MediaPipe) ---------- */
+/* Tier 1 of the pose gate: a lightweight pose model runs on every
+   preview frame (~10 fps) so the user lines up against live feedback —
+   square to the camera / a true 90° turn, shoulders level. The shutter
+   is gated on it. Sapiens then precision-checks the actual shot server-
+   side (tier 2, POST /check). If the model fails to load, capture
+   degrades to the gyroscope gate alone. */
+let poseReady = false, poseOk = true, landmarker = null, lastPoseTs = -1;
+async function initPose() {
+  try {
+    const { PoseLandmarker, FilesetResolver } =
+      await import("/static/mp/vision_bundle.mjs");
+    const vision = await FilesetResolver.forVisionTasks("/static/mp/wasm");
+    landmarker = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: "/static/mp/pose_landmarker_lite.task" },
+      runningMode: "VIDEO", numPoses: 1,
+    });
+    poseReady = true;
+  } catch (e) { console.warn("live pose model unavailable:", e); }
+}
+/* MediaPipe Pose landmark indices: 11/12 shoulders, 13/14 elbows,
+   15/16 wrists, 23/24 hips. */
+function evalPose(L, vw, vh) {
+  if (!L) return setPose(false, "step into frame");
+  const P = i => [L[i].x * vw, L[i].y * vh];
+  const sl = P(11), sr = P(12), hl = P(23), hr = P(24);
+  const torso = Math.abs((sl[1] + sr[1]) / 2 - (hl[1] + hr[1]) / 2);
+  if (torso < 20) return setPose(false, "stand straight, fill the frame");
+  const shR = Math.abs(sl[0] - sr[0]) / torso;
+  const hipR = Math.abs(hl[0] - hr[0]) / torso;
+  const shTilt = Math.abs(sl[1] - sr[1]) / torso;
+  const yaw = Math.acos(Math.min(shR / 0.34, 1)) * 180 / Math.PI;
+  // front + back — square to camera, shoulders level; left/right — 90°.
+  if (stepIdx === 0 || stepIdx === 1) {
+    if (shR < 0.26) return setPose(false, `square up (yaw ${yaw | 0}°)`);
+    if (shTilt > 0.07) return setPose(false, "level your shoulders");
+    return setPose(true, `✓ ${STEP_LABEL[stepIdx].toLowerCase()} pose good`);
+  }
+  if (shR > 0.14 || hipR > 0.20)
+    return setPose(false, `turn ${(90 - yaw) | 0}° further to a full 90°`);
+  return setPose(true, "✓ side pose good — hold still");
+}
+function setPose(ok, msg) {
+  poseOk = ok;
+  if (!$("p-live").classList.contains("hidden")) {
+    const tip = $("tip");
+    tip.textContent = msg;
+    tip.className = ok ? "ok" : "bad";
+  }
+  refreshShutter();
+}
+function poseLoop() {
+  requestAnimationFrame(poseLoop);
+  if (!poseReady || facing === "user"
+      || $("p-live").classList.contains("hidden")) return;
+  const v = $("video");
+  if (v.readyState < 2 || !v.videoWidth) return;
+  const ts = performance.now();
+  if (ts - lastPoseTs < 90) return;       // ~11 fps is plenty
+  lastPoseTs = ts;
+  let res;
+  try { res = landmarker.detectForVideo(v, ts); }
+  catch (e) { return; }
+  evalPose(res.landmarks && res.landmarks[0], v.videoWidth, v.videoHeight);
+}
+initPose();
+requestAnimationFrame(poseLoop);
 
 /* ---------- guide frame + pose ---------- */
 function layoutFrame() {
@@ -274,26 +399,32 @@ function layoutFrame() {
 }
 function setStep(i) {
   stepIdx = i;
-  $("step").textContent = i === 0 ? "Step 1 / 2 — Front" : "Step 2 / 2 — Side";
-  $("tip").textContent = i === 0
-    ? "Face the camera, arms ~45° out, fill the outline."
-    : "Turn 90° — right side to the camera, facing left. Arms down.";
+  $("step").textContent = `Step ${i + 1} / 4 — ${STEP_LABEL[i]}`;
+  $("tip").textContent = STEP_TIP[i];
+  $("tip").className = "";          // cleared; live pose check repaints it
   $("pose").src = POSE_SRC[i];
+  // left/right are mirror poses — flip the side guide for the right step.
+  $("pose").classList.toggle("mirror", i === 3);
 }
 
 /* ---------- capture ---------- */
 let counting = false, ctTimer = null, startPitch = 0, startRoll = 0;
-/* Only the gyroscope gates the shutter — the phone must be vertical for
-   the silhouette projection to be metric. */
+let verifying = false;
+/* The shutter unlocks only when: phone vertical (gyro), no shot being
+   pose-verified, and — once the live pose model is up — the body pose
+   is right (square / 90° turn, shoulders level). */
 function refreshShutter() {
-  $("shutter").disabled = counting || !levelState;
+  // Live pose gate applies to the rear cam only — in selfie mode the
+  // user walks back out of reach and cannot see/act on live feedback.
+  const liveGate = poseReady && !poseOk && facing !== "user";
+  $("shutter").disabled = counting || verifying || !levelState || liveGate;
 }
 $("shutter").onclick = () => {
   if (counting || !levelState) return;
   counting = true;
   startPitch = pitch; startRoll = roll;   // pose to hold for the countdown
   refreshShutter();
-  let n = COUNTDOWN;
+  let n = facing === "user" ? COUNTDOWN_SELFIE : COUNTDOWN;
   const el = $("count");
   el.style.fontSize = ""; el.textContent = n;
   el.classList.remove("hidden");
@@ -331,19 +462,70 @@ function grab() {
   const ctx = c.getContext("2d");
   if (facing === "user") { ctx.translate(sw, 0); ctx.scale(-1, 1); }
   ctx.drawImage(v, sx, sy, sw, sh, 0, 0, sw, sh);
-  c.toBlob(blob => {
-    if (shots[stepIdx]) URL.revokeObjectURL(shots[stepIdx].url);
-    shots[stepIdx] = { blob, url: URL.createObjectURL(blob) };
-    shotMeta[stepIdx] = { pitch, roll };
-    if (stepIdx === 0) { setStep(1); refreshShutter(); }
-    else showReview();
-  }, "image/jpeg", 0.95);
+  c.toBlob(blob => { verifyShot(blob); }, "image/jpeg", 0.95);
+}
+
+/* ---------- Sapiens pose gate ---------- */
+/* Every shot is checked server-side by Sapiens pose before it is kept:
+   the front must be square to the camera, the side a true 90° turn.
+   A bad shot is discarded with a reason; the gate degrades open if
+   Sapiens is unavailable so capture still works on the gyro alone. */
+async function verifyShot(blob) {
+  verifying = true;
+  refreshShutter();
+  const view = VIEWS[stepIdx];
+  $("verifySpin").classList.remove("hidden");
+  $("verifyRetake").classList.add("hidden");
+  $("verifyIssues").innerHTML = "";
+  $("verifyMsg").className = "";
+  $("verifyMsg").textContent = "Checking pose…";
+  $("verify").classList.remove("hidden");
+
+  let j;
+  try {
+    const fd = new FormData();
+    fd.append("shot", blob, "shot.jpg");
+    fd.append("view", view);
+    const r = await fetch("/check", { method: "POST", body: fd });
+    j = await r.json();
+  } catch (e) { j = { ok: true, skipped: true }; }
+
+  $("verifySpin").classList.add("hidden");
+  if (j.ok) {
+    $("verifyMsg").className = "ok";
+    $("verifyMsg").textContent = j.skipped ? "✓ captured" : "✓ pose OK";
+    setTimeout(() => {
+      $("verify").classList.add("hidden");
+      verifying = false;
+      acceptShot(blob);
+    }, 650);
+  } else {
+    $("verifyMsg").className = "bad";
+    $("verifyMsg").textContent = `${STEP_LABEL[stepIdx]} pose — adjust`;
+    const ul = $("verifyIssues");
+    (j.issues || ["pose not usable"]).forEach(t => {
+      const li = document.createElement("li");
+      li.textContent = t; ul.appendChild(li);
+    });
+    $("verifyRetake").classList.remove("hidden");
+  }
+}
+$("verifyRetake").onclick = () => {
+  $("verify").classList.add("hidden");
+  verifying = false;
+  refreshShutter();           // shot discarded — line up and retake
+};
+function acceptShot(blob) {
+  if (shots[stepIdx]) URL.revokeObjectURL(shots[stepIdx].url);
+  shots[stepIdx] = { blob, url: URL.createObjectURL(blob) };
+  shotMeta[stepIdx] = { pitch, roll };
+  if (stepIdx < VIEWS.length - 1) { setStep(stepIdx + 1); refreshShutter(); }
+  else showReview();
 }
 
 /* ---------- review / upload ---------- */
 function showReview() {
-  $("t-front").src = shots[0].url;
-  $("t-side").src = shots[1].url;
+  VIEWS.forEach((v, i) => { $("t-" + v).src = shots[i].url; });
   $("p-live").classList.add("hidden");
   $("p-review").classList.remove("hidden");
 }
@@ -356,12 +538,12 @@ $("send").onclick = async () => {
   $("send").disabled = true;
   $("reviewErr").textContent = "uploading…";
   const fd = new FormData();
-  fd.append("front", shots[0].blob, "front.jpg");
-  fd.append("side", shots[1].blob, "side.jpg");
+  VIEWS.forEach((v, i) => fd.append(v, shots[i].blob, v + ".jpg"));
   fd.append("height_cm", $("height").value);
   fd.append("weight_kg", $("weight").value);
   fd.append("gender", $("gender").value);
-  fd.append("meta", JSON.stringify({ front: shotMeta[0], side: shotMeta[1] }));
+  fd.append("meta", JSON.stringify(
+    Object.fromEntries(VIEWS.map((v, i) => [v, shotMeta[i]]))));
   try {
     const r = await fetch("/upload", { method: "POST", body: fd });
     const j = await r.json();

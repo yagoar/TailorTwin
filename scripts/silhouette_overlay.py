@@ -224,10 +224,16 @@ def main(argv=None):
         if floor_f is not None or floor_s is not None:
             print(f"ground landmark: front={floor_f} side={floor_s}")
 
-    f_bot = floor_f if floor_f is not None else float(np.where(front_mask>0)[0].max())
-    s_bot = floor_s if floor_s is not None else float(np.where(side_mask >0)[0].max())
-    scale_f = (f_bot - fy_top) / mesh_h_m
-    scale_s = (s_bot - sy_top) / mesh_h_m
+    # Scale based on the SILHOUETTE body extent (head_top → heel pixel).
+    # Using the ground line as the bottom anchor instead would stretch
+    # the mesh's anatomical proportions vertically — shoulders / waist /
+    # crotch end up higher in image than the photo's because mesh
+    # head_top→sole gets mapped onto photo head_top→ground (which is
+    # longer when there's a gap between heel and floor).
+    f_silbot = float(np.where(front_mask > 0)[0].max())
+    s_silbot = float(np.where(side_mask  > 0)[0].max())
+    scale_f = (f_silbot - fy_top) / mesh_h_m
+    scale_s = (s_silbot - sy_top) / mesh_h_m
 
     f_img = render_wire_over_sil(verts, faces, "front", front_mask,
                                   fh, fw, scale_f, fxc, fyc,

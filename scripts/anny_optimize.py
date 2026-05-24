@@ -321,6 +321,14 @@ def main(argv=None):
     if "upperarm01.R" in bm.bone_labels:
         a_pose["upperarm01.R"] = torch.from_numpy(
             rot_y(np.deg2rad(-60.0)))[None].to(dev)
+    # Rotate upperlegs inward so feet are roughly together (Anny rest
+    # pose has feet shoulder-width-plus apart).
+    if "upperleg01.L" in bm.bone_labels:
+        a_pose["upperleg01.L"] = torch.from_numpy(
+            rot_y(np.deg2rad(-7.0)))[None].to(dev)
+    if "upperleg01.R" in bm.bone_labels:
+        a_pose["upperleg01.R"] = torch.from_numpy(
+            rot_y(np.deg2rad(7.0)))[None].to(dev)
 
     def forward():
         out = bm(pose_parameters=a_pose,

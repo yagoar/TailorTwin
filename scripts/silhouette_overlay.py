@@ -140,16 +140,11 @@ def main(argv=None):
         # — independent of the photo's arm/head orientation.
         body_pose = _build_a_pose(args.shoulder_deg).astype(np.float32)
         body_pose = body_pose.reshape(1, 63)
-    # Lift toes (ankle dorsiflexion) so the foot is flat. Canonical SMPL-X
-    # has toes pointing forward+down — toe tip ~2cm below the heel — so
-    # mesh y_min lands below the actual sole and the overlay's heel
-    # appears 2cm below the photo's floor row. Rotate L_Ankle (body_pose
-    # joint index 6) and R_Ankle (index 7) around the lateral X axis by
-    # ~6° to bring the sole flat to ground.
-    pose_view = body_pose.reshape(21, 3)
-    pose_view[6, 0] += 0.10   # L_Ankle dorsiflex
-    pose_view[7, 0] += 0.10   # R_Ankle dorsiflex
-    body_pose = pose_view.reshape(1, 63)
+    # Keep the canonical SMPL-X foot pose: toes forward + slightly down
+    # so the toe tip is the lowest mesh point. The overlay anchors
+    # ``mesh y_max`` (the toe in projection) to the ``ground`` landmark
+    # row — which matches the photo (camera looking slightly down ⇒
+    # photo toe is the lowest body pixel, heel sits a few rows higher).
     bm = smplx.create(model_path="data/body_models", model_type="smplx",
                        gender=args.gender, num_betas=num_betas,
                        use_pca=False, flat_hand_mean=True, batch_size=1)

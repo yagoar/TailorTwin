@@ -292,7 +292,7 @@ def main(argv=None):
     photo_xc_s_t = torch.tensor(photo_xc_s, device=dev)
     photo_yc_s_t = torch.tensor(photo_yc_s, device=dev)
 
-    bary = make_bary_grid(3, dev)
+    bary = make_bary_grid(5, dev)
     kernel = _gauss_kernel(args.gauss_sigma, dev)
 
     opt = torch.optim.Adam(
@@ -306,8 +306,25 @@ def main(argv=None):
         return torch.stack([pts2d[:, 0] + xc - x_mid,
                             pts2d[:, 1] + yc - y_mid], dim=-1)
 
+    # A-pose: rotate upper-arm bones so arms swing down (60°). Anny is
+    # Z-up. Y axis points forward → rotating around Y swings +X arm
+    # (left) downward.
+    def rot_y(ang_rad):
+        c, s = float(np.cos(ang_rad)), float(np.sin(ang_rad))
+        T = np.eye(4, dtype=np.float32)
+        T[:3, :3] = [[c, 0, s], [0, 1, 0], [-s, 0, c]]
+        return T
+    a_pose = {}
+    if "upperarm01.L" in bm.bone_labels:
+        a_pose["upperarm01.L"] = torch.from_numpy(
+            rot_y(np.deg2rad(60.0)))[None].to(dev)
+    if "upperarm01.R" in bm.bone_labels:
+        a_pose["upperarm01.R"] = torch.from_numpy(
+            rot_y(np.deg2rad(-60.0)))[None].to(dev)
+
     def forward():
-        out = bm(phenotype_kwargs={**fixed, **pheno},
+        out = bm(pose_parameters=a_pose,
+                 phenotype_kwargs={**fixed, **pheno},
                  local_changes_kwargs=lc)
         verts_zup = out["vertices"][0].to(torch.float32)
         verts = anny_to_yup(verts_zup)

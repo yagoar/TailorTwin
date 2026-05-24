@@ -119,6 +119,13 @@ def main(argv=None):
                     help="Skip Multi-HMR phenotype seeding (baseline = "
                          "default 0.5 phenotype). Use to A/B test the "
                          "benefit of the photo seed.")
+    ap.add_argument("--keep-mhr-phenotype", action="store_true",
+                    help="Use Multi-HMR's full 6-D phenotype as-is "
+                         "(don't override height/weight from tape). "
+                         "MHR's shape vector is internally consistent "
+                         "— touching height alone warps proportions. "
+                         "Body will be ~3-5%% off on tape height/mass "
+                         "but visually match the photo subject.")
     args = ap.parse_args(argv)
 
     # ── Landmarks JSON ──
@@ -152,38 +159,44 @@ def main(argv=None):
     print(f"Anny model: gender={args.gender}, age={args.age}y "
           f"→ phenotype.age={f.age:.3f}")
 
-    # Seed muscle + proportions from Multi-HMR (photo-derived body shape).
-    # Keep gender/age locked to user-known values. Height/weight will be
-    # re-bisected below from known cm/kg.
+    # Seed phenotype from Multi-HMR.
     if mhr_shape is not None:
-        f.pheno["muscle"] = float(mhr_shape[MHR_PHENO_ORDER.index("muscle")])
-        f.pheno["proportions"] = float(mhr_shape[MHR_PHENO_ORDER.index("proportions")])
-        # Use MHR height/weight only as initial bisect bracket starting
-        # point; the bisect below will refine to nail exact cm/kg.
-        f.pheno["height"] = float(mhr_shape[MHR_PHENO_ORDER.index("height")])
-        f.pheno["weight"] = float(mhr_shape[MHR_PHENO_ORDER.index("weight")])
-        print(f"seeded muscle={f.pheno['muscle']:.3f}  "
+        for name in MHR_PHENO_ORDER:
+            if name in ("gender", "age"):
+                continue  # keep user-known values
+            f.pheno[name] = float(mhr_shape[MHR_PHENO_ORDER.index(name)])
+        print(f"seeded MHR phenotype: muscle={f.pheno['muscle']:.3f}  "
               f"proportions={f.pheno['proportions']:.3f}  "
-              f"(photo-derived, kept fixed through tape solve)")
+              f"height={f.pheno['height']:.3f}  "
+              f"weight={f.pheno['weight']:.3f}")
 
-    # ── Lock height ──
     height_cm = float(measurements.get("height", 160.0))
+    weight_kg = float(measurements.get("weight_kg", 57.0))
+
     def h_of(coef):
         f.pheno["height"] = coef; return f.anth_height_cm()
-    f.pheno["height"] = bisect(h_of, 0.0, 1.0, target=height_cm, tol=0.1)
-    print(f"phenotype.height = {f.pheno['height']:.3f}  "
-          f"→ {f.anth_height_cm():.1f}cm  (target {height_cm})")
-
-    # ── Lock weight ──
-    weight_kg = float(measurements.get("weight_kg", 57.0))
     def w_of(coef):
         f.pheno["weight"] = coef; return f.anth_mass_kg()
-    f.pheno["weight"] = bisect(w_of, 0.0, 1.0, target=weight_kg, tol=0.2)
-    # Re-pin height (weight changes it).
-    f.pheno["height"] = bisect(h_of, 0.0, 1.0, target=height_cm, tol=0.1)
-    print(f"phenotype.weight = {f.pheno['weight']:.3f}  "
-          f"→ {f.anth_mass_kg():.1f}kg  (target {weight_kg})")
-    print(f"re-pin height:     {f.anth_height_cm():.1f}cm")
+
+    if args.keep_mhr_phenotype and mhr_shape is not None:
+        # Trust MHR's full 6-D phenotype — proportions only make sense
+        # as a coupled vector. Report deviation but don't fix it via
+        # bisect; tape blendshapes still run on top.
+        print(f"keep-mhr-phenotype: H={f.anth_height_cm():.1f}cm "
+              f"(target {height_cm})  W={f.anth_mass_kg():.1f}kg "
+              f"(target {weight_kg}) — leaving phenotype as MHR predicted")
+    else:
+        # ── Lock height ──
+        f.pheno["height"] = bisect(h_of, 0.0, 1.0, target=height_cm, tol=0.1)
+        print(f"phenotype.height = {f.pheno['height']:.3f}  "
+              f"→ {f.anth_height_cm():.1f}cm  (target {height_cm})")
+        # ── Lock weight ──
+        f.pheno["weight"] = bisect(w_of, 0.0, 1.0, target=weight_kg, tol=0.2)
+        # Re-pin height (weight changes it).
+        f.pheno["height"] = bisect(h_of, 0.0, 1.0, target=height_cm, tol=0.1)
+        print(f"phenotype.weight = {f.pheno['weight']:.3f}  "
+              f"→ {f.anth_mass_kg():.1f}kg  (target {weight_kg})")
+        print(f"re-pin height:     {f.anth_height_cm():.1f}cm")
 
     # ── Pre-tape shape blendshapes (fixed coefs, not bisected). ──
     # ``breast-point-incr`` adds bust forward projection AND
@@ -237,15 +250,16 @@ def main(argv=None):
         print(f"  {lm_key:10}  {target_cm:>7.1f}  {baseline:>8.1f}  "
               f"{coef:>+6.2f}  {final:>7.1f}{tag}{sat}")
 
-    # ── Re-pin height + weight after tape blendshapes ──
-    # Tape ``measure-*-circ-incr`` shifts mesh mass (negative coefs
-    # remove flesh), so anth_mass_kg drifts off target. Re-bisect
-    # phenotype.weight / height to lock them.
-    print("\nre-pin after tape:")
-    f.pheno["weight"] = bisect(w_of, 0.0, 1.0, target=weight_kg, tol=0.2)
-    f.pheno["height"] = bisect(h_of, 0.0, 1.0, target=height_cm, tol=0.1)
-    print(f"  weight = {f.pheno['weight']:.3f}  → {f.anth_mass_kg():.1f}kg")
-    print(f"  height = {f.pheno['height']:.3f}  → {f.anth_height_cm():.1f}cm")
+    if not (args.keep_mhr_phenotype and mhr_shape is not None):
+        # ── Re-pin height + weight after tape blendshapes ──
+        # Tape ``measure-*-circ-incr`` shifts mesh mass (negative coefs
+        # remove flesh), so anth_mass_kg drifts off target. Re-bisect
+        # phenotype.weight / height to lock them.
+        print("\nre-pin after tape:")
+        f.pheno["weight"] = bisect(w_of, 0.0, 1.0, target=weight_kg, tol=0.2)
+        f.pheno["height"] = bisect(h_of, 0.0, 1.0, target=height_cm, tol=0.1)
+        print(f"  weight = {f.pheno['weight']:.3f}  → {f.anth_mass_kg():.1f}kg")
+        print(f"  height = {f.pheno['height']:.3f}  → {f.anth_height_cm():.1f}cm")
 
     print(f"\nfinal: H={f.anth_height_cm():.1f}cm  "
           f"W={f.anth_mass_kg():.1f}kg")

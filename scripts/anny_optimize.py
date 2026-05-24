@@ -189,6 +189,16 @@ def main(argv=None):
     ap.add_argument("--img-h", type=int, default=384)
     ap.add_argument("--img-w", type=int, default=240)
     ap.add_argument("--gauss-sigma", type=float, default=0.7)
+    ap.add_argument("--init-npz", type=Path, default=None,
+                    help="anny_photofit / earlier opt run NPZ to warm-start "
+                         "phenotype + local_changes from.")
+    ap.add_argument("--w-iou", type=float, default=4.0,
+                    help="Multiplier on (front IoU + side IoU) loss.")
+    ap.add_argument("--w-tape", type=float, default=0.1)
+    ap.add_argument("--w-reg-height", type=float, default=0.05)
+    ap.add_argument("--w-reg-weight", type=float, default=0.01)
+    ap.add_argument("--w-reg-pheno",  type=float, default=0.1)
+    ap.add_argument("--w-reg-lc",     type=float, default=0.02)
     args = ap.parse_args(argv)
 
     dev = torch.device("cpu")
@@ -269,15 +279,32 @@ def main(argv=None):
         print(f"loaded tape targets: {tape_targets}")
         print(f"loaded lm_y_frac:    {lm_y_frac}")
 
-    # Optimizable parameters.
-    pheno_init = {"height": 0.36, "weight": 0.4, "muscle": 0.5,
-                  "proportions": 0.5}
+    # Optimizable parameters — warm-start from --init-npz if given.
+    if args.init_npz and args.init_npz.exists():
+        z = np.load(args.init_npz, allow_pickle=True)
+        init_pheno = dict(z["phenotype"].item())
+        init_lc = dict(z["local_changes"].item())
+        print(f"warm-start from {args.init_npz}: "
+              f"pheno keys={list(init_pheno)[:4]}…  "
+              f"lc nonzero={sum(1 for v in init_lc.values() if abs(v) > 1e-3)}")
+    else:
+        init_pheno = {"height": 0.36, "weight": 0.4, "muscle": 0.5,
+                       "proportions": 0.5}
+        init_lc = {}
+    pheno_init = {"height": float(init_pheno.get("height", 0.36)),
+                   "weight": float(init_pheno.get("weight", 0.4)),
+                   "muscle": float(init_pheno.get("muscle", 0.5)),
+                   "proportions": float(init_pheno.get("proportions", 0.5))}
     pheno = {k: torch.nn.Parameter(torch.tensor(v, device=dev))
              for k, v in pheno_init.items()}
     gender_val = 0.0 if args.gender == "female" else 1.0
     fixed = {"gender": torch.tensor(gender_val, device=dev),
              "age": torch.tensor(float(args.age), device=dev)}
-    lc = {k: torch.nn.Parameter(torch.tensor(0.0, device=dev)) for k in SHAPE_LC}
+    lc = {k: torch.nn.Parameter(
+              torch.tensor(float(init_lc.get(k, 0.0)), device=dev))
+          for k in SHAPE_LC}
+    pheno_seed = {k: float(v) for k, v in pheno_init.items()}
+    lc_seed = {k: float(init_lc.get(k, 0.0)) for k in SHAPE_LC}
 
     # Camera: orthographic, anchored to photo body bbox.
     body_h_m = args.height / 100.0
@@ -358,7 +385,7 @@ def main(argv=None):
         return verts, sil_f, sil_s, out
 
     print(f"\noptimizing {args.iters} iters …")
-    best_loss = float("inf"); best_state = None
+    best_loss = -float("inf"); best_state = None
     for it in range(args.iters):
         opt.zero_grad()
         verts, sil_f, sil_s, out = forward()
@@ -381,21 +408,25 @@ def main(argv=None):
                 g_cm = g_m * 100.0
                 tape_loss = tape_loss + ((g_cm - cm) / 10.0) ** 2
 
-        # Height prior — strong pull on anthropometric height.
+        # Height prior — pull anthropometric height to target.
         anth_h_cm = anth.height(out["vertices"])[0].to(torch.float32) * 100.0
-        reg_h = 0.5 * (anth_h_cm - args.height) ** 2
+        reg_h = (anth_h_cm - args.height) ** 2
         # Weight prior — pull anthropometric mass (kg) to target.
         reg_w = verts.new_zeros(())
         if args.target_weight_kg is not None:
             mass_kg = anth.mass(out["vertices"])[0].to(torch.float32)
-            reg_w = 0.05 * (mass_kg - args.target_weight_kg) ** 2
+            reg_w = (mass_kg - args.target_weight_kg) ** 2
+        # Phenotype reg toward warm-start seed (not toward mean 0.5).
+        reg_p = sum((p - pheno_seed[k]) ** 2 for k, p in pheno.items())
+        # LC reg toward seed too (anny_photofit's solved coefs are good).
+        reg_l = sum((c - lc_seed[k]) ** 2 for k, c in lc.items())
 
-        # Light reg on phenotype + lc params to keep them in plausible range.
-        reg_p = 0.5 * sum((p - 0.5) ** 2 for p in pheno.values())
-        reg_l = 0.1 * sum((c) ** 2 for c in lc.values())
-
-        # Downweight tape so silhouette dominates initially.
-        loss = loss_f + loss_s + 0.1 * tape_loss + reg_h + reg_w + reg_p + reg_l
+        loss = (args.w_iou * (loss_f + loss_s)
+              + args.w_tape * tape_loss
+              + args.w_reg_height * reg_h
+              + args.w_reg_weight * reg_w
+              + args.w_reg_pheno  * reg_p
+              + args.w_reg_lc     * reg_l)
         loss.backward()
         opt.step()
         # Clamp phenotypes to [0, 1] and local_changes to [-1.5, 1.5]
@@ -403,8 +434,11 @@ def main(argv=None):
             for p in pheno.values(): p.clamp_(0.0, 1.0)
             for c in lc.values(): c.clamp_(-1.5, 1.5)
 
-        if loss.item() < best_loss:
-            best_loss = loss.item()
+        # Track best by IoU-only (not total loss). Regs/tape can drop the
+        # total loss while IoU regresses — we want the BEST SILHOUETTE.
+        iou_total = (1 - loss_f.item()) + (1 - loss_s.item())
+        if iou_total > best_loss:
+            best_loss = iou_total
             best_state = {"pheno": {k: v.detach().clone() for k, v in pheno.items()},
                           "lc": {k: v.detach().clone() for k, v in lc.items()},
                           "scale": scale.detach().clone(), "iter": it,

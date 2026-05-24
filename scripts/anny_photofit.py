@@ -185,6 +185,18 @@ def main(argv=None):
           f"→ {f.anth_mass_kg():.1f}kg  (target {weight_kg})")
     print(f"re-pin height:     {f.anth_height_cm():.1f}cm")
 
+    # ── Pre-tape shape blendshapes (fixed coefs, not bisected). ──
+    # ``breast-point-incr`` adds bust forward projection AND
+    # circumference. Setting it positive before the tape solver lets
+    # ``measure-bust-circ-incr`` go more negative to hit the same 88cm
+    # target — net result: same circumference, real cup shape rather
+    # than a flat chest. Without this the bust projects ~zero in the
+    # side view since Anny default + negative bust-circ-incr both push
+    # the chest flat.
+    f.lc["breast-point-incr"] = 1.5
+    f.lc["torso-scale-depth-incr"] = 0.3
+    print("pre-tape shape: breast-point-incr=+1.5  torso-scale-depth-incr=+0.3")
+
     # ── Tape blendshapes ──
     print("\ntape girth fits (canonical pose, photo-seeded phenotype):")
     print(f"  {'name':10}  {'target':>7}  {'baseline':>8}  "
@@ -238,10 +250,11 @@ def main(argv=None):
     print(f"\nfinal: H={f.anth_height_cm():.1f}cm  "
           f"W={f.anth_mass_kg():.1f}kg")
 
-    # ── Save fit ──
+    # ── Save canonical fit (tape solve T-pose for measurement). ──
     args.out_prefix.parent.mkdir(parents=True, exist_ok=True)
     out_npz = args.out_prefix.with_name(args.out_prefix.name + "_photofit.npz")
     verts = f.verts()
+    faces_np = f.bm.get_triangular_faces().cpu().numpy()
     np.savez(out_npz,
              phenotype={k: float(v) for k, v in f.pheno.items()},
              local_changes={k: float(v) for k, v in f.lc.items()},
@@ -249,15 +262,45 @@ def main(argv=None):
                         else np.zeros(0, dtype=np.float32)),
              gender=args.gender, age_years=args.age,
              vertices=verts.astype(np.float32),
-             faces=f.bm.get_triangular_faces().cpu().numpy().astype(np.int32))
+             faces=faces_np.astype(np.int32))
     print(f"wrote {out_npz}")
-    # OBJ
     obj = args.out_prefix.with_name(args.out_prefix.name + "_photofit.obj")
-    faces = f.bm.get_triangular_faces().cpu().numpy()
     with open(obj, "w") as fh:
         for x, y, z in verts: fh.write(f"v {x} {y} {z}\n")
-        for a, b, c in faces: fh.write(f"f {a+1} {b+1} {c+1}\n")
+        for a, b, c in faces_np: fh.write(f"f {a+1} {b+1} {c+1}\n")
     print(f"wrote {obj}")
+
+    # ── Save per-view photo-pose meshes (RENDER ONLY). ──
+    # Same phenotype + lc, photo-derived bone rotvecs from each view.
+    # Tape numbers are NOT recomputed in these poses — slice geometry
+    # only makes sense in canonical pose, but the photo-matched pose
+    # gives a fair body-shape comparison against the photo silhouette.
+    if not args.no_mhr_seed:
+        import roma
+        labels = f.bm.bone_labels
+        for view, mhr_path in (("front", args.multihmr_front),
+                                ("side",  args.multihmr_side)):
+            mhr = load_mhr(mhr_path)
+            rotvec = mhr["rotvec"].cpu().numpy()
+            rotmat = roma.rotvec_to_rotmat(torch.from_numpy(rotvec)).numpy()
+            homo = np.tile(np.eye(4, dtype=np.float32),
+                           (rotmat.shape[0], 1, 1))
+            homo[:, :3, :3] = rotmat
+            pose_dict = {labels[i]: torch.from_numpy(homo[i])[None]
+                         for i in range(1, len(labels))}
+            f.a_pose = pose_dict
+            render_verts = f.verts()
+            r_npz = args.out_prefix.with_name(
+                args.out_prefix.name + f"_render_{view}.npz")
+            r_obj = args.out_prefix.with_name(
+                args.out_prefix.name + f"_render_{view}.obj")
+            np.savez(r_npz,
+                     vertices=render_verts.astype(np.float32),
+                     faces=faces_np.astype(np.int32))
+            with open(r_obj, "w") as fh:
+                for x, y, z in render_verts: fh.write(f"v {x} {y} {z}\n")
+                for a, b, c in faces_np: fh.write(f"f {a+1} {b+1} {c+1}\n")
+            print(f"wrote {r_npz}  ({view} Multi-HMR pose, RENDER ONLY)")
     return 0
 
 

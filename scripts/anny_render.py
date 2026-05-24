@@ -40,8 +40,10 @@ def project_ortho(verts: np.ndarray, view: str) -> np.ndarray:
     if view == "front":
         u = verts[:, 0]
         v = -verts[:, 2]
-    else:  # side
-        u = verts[:, 1]
+    else:  # side — photo subject faces +X in image (camera right).
+        # Anny +Y is forward (away from face). Flip sign so the nose
+        # points right in image, matching the photo orientation.
+        u = -verts[:, 1]
         v = -verts[:, 2]
     return np.stack([u, v], axis=1)
 
@@ -93,7 +95,12 @@ def compose(seg_path: Path, photo_path: Path, verts: np.ndarray,
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--fit-npz", type=Path, required=True)
+    ap.add_argument("--fit-npz", type=Path, default=None,
+                    help="Single mesh NPZ used for both views.")
+    ap.add_argument("--front-npz", type=Path, default=None,
+                    help="Mesh NPZ for front view (overrides --fit-npz).")
+    ap.add_argument("--side-npz", type=Path, default=None,
+                    help="Mesh NPZ for side view (overrides --fit-npz).")
     ap.add_argument("--front-photo", type=Path,
                     default=Path("data/captures/me_photos/pair_20260522_090554/front.jpg"))
     ap.add_argument("--side-photo", type=Path,
@@ -105,11 +112,16 @@ def main(argv=None):
     ap.add_argument("--out-prefix", type=Path, required=True)
     args = ap.parse_args(argv)
 
-    verts, faces = load_npz_mesh(args.fit_npz)
     args.out_prefix.parent.mkdir(parents=True, exist_ok=True)
-    compose(args.front_seg, args.front_photo, verts, faces, "front",
+    front_path = args.front_npz or args.fit_npz
+    side_path = args.side_npz or args.fit_npz
+    if front_path is None or side_path is None:
+        raise SystemExit("Provide --fit-npz or both --front-npz/--side-npz.")
+    fverts, ffaces = load_npz_mesh(front_path)
+    sverts, sfaces = load_npz_mesh(side_path)
+    compose(args.front_seg, args.front_photo, fverts, ffaces, "front",
             args.out_prefix.with_name(args.out_prefix.name + "_front.png"))
-    compose(args.side_seg, args.side_photo, verts, faces, "side",
+    compose(args.side_seg, args.side_photo, sverts, sfaces, "side",
             args.out_prefix.with_name(args.out_prefix.name + "_side.png"))
     return 0
 

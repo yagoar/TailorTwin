@@ -365,12 +365,17 @@ def main(argv=None):
         T[:3, :3] = [[c, 0, s], [0, 1, 0], [-s, 0, c]]
         return T
     a_pose = {}
+    # 90° = arms fully down at sides (matches the photo subject's
+    # hands-at-thighs pose AND the Sapiens-arm-stripped silhouette,
+    # which excludes laterally-extending arms). 60° left arms half-out,
+    # causing the rasterizer + IoU loss to twist the torso to absorb
+    # them.
     if "upperarm01.L" in bm.bone_labels:
         a_pose["upperarm01.L"] = torch.from_numpy(
-            rot_y(np.deg2rad(60.0)))[None].to(dev)
+            rot_y(np.deg2rad(90.0)))[None].to(dev)
     if "upperarm01.R" in bm.bone_labels:
         a_pose["upperarm01.R"] = torch.from_numpy(
-            rot_y(np.deg2rad(-60.0)))[None].to(dev)
+            rot_y(np.deg2rad(-90.0)))[None].to(dev)
     # Rotate upperlegs inward so feet are roughly together (Anny rest
     # pose has feet shoulder-width-plus apart).
     if "upperleg01.L" in bm.bone_labels:
@@ -395,7 +400,11 @@ def main(argv=None):
                             torch.zeros(()))
         uv_f = aligned_translate(uv_f, photo_xc_f_t, photo_yc_f_t)
         sil_f = soft_silhouette(uv_f, args.img_h, args.img_w, kernel)
-        pts_s = _face_points(verts, faces_full, bary)
+        # Use faces_noarm for BOTH views — both Sapiens silhouettes
+        # have arm classes dropped, so feeding the rasterizer arm
+        # triangles makes IoU loss try to deform the body to absorb
+        # them.
+        pts_s = _face_points(verts, faces_noarm, bary)
         uv_s = project_view(pts_s, "side", args.img_h, args.img_w,
                             scale, torch.zeros(()),
                             torch.zeros(()))

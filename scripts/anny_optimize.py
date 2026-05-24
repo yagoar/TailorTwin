@@ -69,26 +69,45 @@ def _slice_girth(pts: torch.Tensor, lo, hi, axis: int = 1) -> torch.Tensor:
 torch.set_default_dtype(torch.float32)
 
 
-# Body-shape local_changes we optimise. All in [-1, 1]; default 0 = mean.
+# Body-shape local_changes we optimise. All in [-1.5, 1.5]; default 0.
+# Order doesn't matter — used as a name set. Group by region for review.
 SHAPE_LC = [
-    "measure-bust-circ-incr",
-    "measure-underbust-circ-incr",
-    "measure-waist-circ-incr",
-    "measure-hips-circ-incr",
-    "measure-thigh-circ-incr",
-    "measure-knee-circ-incr",
-    "measure-upperarm-circ-incr",
-    "measure-neck-circ-incr",
-    "measure-shoulder-dist-incr",
-    "measure-waisttohip-dist-incr",
-    "measure-upperleg-height-incr",
-    "measure-lowerleg-height-incr",
-    "measure-napetowaist-dist-incr",
-    "measure-frontchest-dist-incr",
-    "breast-volume-vert-up",
+    # Tape-driven circumferences
+    "measure-bust-circ-incr", "measure-underbust-circ-incr",
+    "measure-waist-circ-incr", "measure-hips-circ-incr",
+    "measure-thigh-circ-incr", "measure-knee-circ-incr",
+    "measure-upperarm-circ-incr", "measure-neck-circ-incr",
+    # Tape-driven proportions
+    "measure-shoulder-dist-incr", "measure-waisttohip-dist-incr",
+    "measure-upperleg-height-incr", "measure-lowerleg-height-incr",
+    "measure-napetowaist-dist-incr", "measure-frontchest-dist-incr",
+    # Torso shape
+    "torso-vshape-incr", "stomach-tone-incr",
+    "torso-scale-horiz-incr", "torso-scale-depth-incr",
+    "torso-muscle-pectoral-incr", "torso-muscle-dorsi-incr",
+    # Breast / chest
+    "breast-volume-vert-up", "breast-point-incr",
+    "breast-dist-incr",
+    # Buttocks / hip lateral
     "buttocks-volume-incr",
-    "torso-vshape-incr",
-    "stomach-tone-incr",
+    "hip-scale-depth-incr", "hip-trans-forward",
+    "hip-trans-out",
+    # Neck
+    "neck-scale-horiz-incr", "neck-scale-depth-incr",
+    "neck-double-incr",
+    # Arms (symmetric — separate left/right paths still optimize same)
+    "l-upperarm-fat-incr", "r-upperarm-fat-incr",
+    "l-upperarm-muscle-incr", "r-upperarm-muscle-incr",
+    "l-lowerarm-fat-incr", "r-lowerarm-fat-incr",
+    "l-lowerarm-muscle-incr", "r-lowerarm-muscle-incr",
+    # Legs — critical for the pear→athletic shape shift
+    "l-upperleg-fat-incr", "r-upperleg-fat-incr",
+    "l-upperleg-muscle-incr", "r-upperleg-muscle-incr",
+    "l-upperleg-scale-horiz-incr", "r-upperleg-scale-horiz-incr",
+    "l-upperleg-scale-depth-incr", "r-upperleg-scale-depth-incr",
+    "l-lowerleg-fat-incr", "r-lowerleg-fat-incr",
+    "l-lowerleg-muscle-incr", "r-lowerleg-muscle-incr",
+    "l-lowerleg-scale-horiz-incr", "r-lowerleg-scale-horiz-incr",
 ]
 
 

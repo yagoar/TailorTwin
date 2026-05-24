@@ -179,7 +179,11 @@ def main(argv=None):
                     help="Subject height in cm.")
     ap.add_argument("--gender", default="female")
     ap.add_argument("--age", type=float, default=0.55,
-                    help="Anny age in [0,1] (0=infant, 0.5≈25y, 1=elder).")
+                    help="Anny age in [0,1] (0=infant, 0.5≈25y, 0.55≈30y, "
+                         "0.7≈50y, 1=elder).")
+    ap.add_argument("--target-weight-kg", type=float, default=None,
+                    help="Subject weight in kg. Pulls Anny anthropometric "
+                         "mass via the ``weight`` phenotype.")
     ap.add_argument("--iters", type=int, default=600)
     ap.add_argument("--lr", type=float, default=0.02)
     ap.add_argument("--img-h", type=int, default=384)
@@ -380,13 +384,18 @@ def main(argv=None):
         # Height prior — strong pull on anthropometric height.
         anth_h_cm = anth.height(out["vertices"])[0].to(torch.float32) * 100.0
         reg_h = 0.5 * (anth_h_cm - args.height) ** 2
+        # Weight prior — pull anthropometric mass (kg) to target.
+        reg_w = verts.new_zeros(())
+        if args.target_weight_kg is not None:
+            mass_kg = anth.mass(out["vertices"])[0].to(torch.float32)
+            reg_w = 0.05 * (mass_kg - args.target_weight_kg) ** 2
 
         # Light reg on phenotype + lc params to keep them in plausible range.
         reg_p = 0.5 * sum((p - 0.5) ** 2 for p in pheno.values())
         reg_l = 0.1 * sum((c) ** 2 for c in lc.values())
 
         # Downweight tape so silhouette dominates initially.
-        loss = loss_f + loss_s + 0.1 * tape_loss + reg_h + reg_p + reg_l
+        loss = loss_f + loss_s + 0.1 * tape_loss + reg_h + reg_w + reg_p + reg_l
         loss.backward()
         opt.step()
         # Clamp phenotypes to [0, 1] and local_changes to [-1.5, 1.5]
@@ -403,9 +412,10 @@ def main(argv=None):
                           "iou_s": 1 - loss_s.item()}
         if it % 25 == 0 or it == args.iters - 1:
             verts_h_cm = anth_h_cm.item()
+            mass_kg = anth.mass(out["vertices"])[0].item()
             print(f"  iter {it:4d}  total={loss.item():.3f}  "
                   f"IoU_f={1-loss_f.item():.3f}  IoU_s={1-loss_s.item():.3f}  "
-                  f"H={verts_h_cm:.1f}cm")
+                  f"H={verts_h_cm:.1f}cm  W={mass_kg:.1f}kg")
 
     print(f"\nbest at iter {best_state['iter']}: "
           f"IoU_f={best_state['iou_f']:.3f} IoU_s={best_state['iou_s']:.3f}")

@@ -242,21 +242,20 @@ DYNAMIC_LANDMARKS: dict[str, dict] = {
         "samples": 30,
         "x_ref": "ankle_bone_lateral_left",
     },
-    # high_hip_level: front abdomen most prominent (Seamly A12, G08).
-    # Search the Y window between the waist string and crotch for the
-    # slice with the largest max-Z among centre-line vertices. The
-    # midline X band (±0.05m around waist_cf.x) prevents wide hip
-    # flares from outvoting the belly.
+    # high_hip_level: the highhip ring, taped 8 cm below the natural
+    # waist. The search runs in a tight 1 cm band centred on
+    # waist − 8 cm, so the slice is pinned to that height rather than
+    # drifting to the abdomen apex (which sits lower and wider).
     "high_hip_level": {
         "search": "max_front_z_y",
-        "y_lower": "crotch_midpoint",
+        "y_lower": "waist_string",
         "y_upper": "waist_string",
-        "y_lower_offset": 0.02,
-        "y_upper_offset": 0.04,
+        "y_lower_offset": -0.085,
+        "y_upper_offset": 0.075,
         "regions": ("torso",),
         "x_midline_ref": "waist_cf",
         "x_midline_band": 0.05,
-        "samples": 30,
+        "samples": 8,
     },
     # (hip_level moved back to COMPOUND_LANDMARKS — see crotch+0.07 entry.)
     # Waist front body point at the bust apex X — used as the endpoint

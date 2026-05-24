@@ -168,6 +168,49 @@ def chamfer_bidirectional(
     return loss_a + loss_b
 
 
+def chamfer_scan_to_mesh(
+    smplx_verts: torch.Tensor,
+    scan_verts: torch.Tensor,
+    mesh_mask: "np.ndarray | None" = None,
+    mesh_to_scan_thresh: float = 0.05,
+    scan_tree: "cKDTree | None" = None,
+) -> torch.Tensor:
+    """Partial-cloud chamfer for a single/dual-view pointmap shell.
+
+    Two terms:
+
+    * **scan → mesh** (all points) — every measured point pulls its
+      nearest SMPL-X vertex.
+    * **mesh → scan, thresholded** — only SMPL-X vertices *within*
+      ``mesh_to_scan_thresh`` of the cloud are pulled back. This bounds
+      the seen surface (scan→mesh alone is nearly blind to an inflated
+      mesh — a bigger surface still passes near every scan point), while
+      vertices far from any scan point (the unobserved back / far side)
+      are dropped so they are not collapsed inward.
+
+    ``mesh_mask`` restricts the candidate SMPL-X vertices — pass a
+    non-arm mask when the scan cloud is arm-free, so a torso scan point
+    near the armpit cannot snap onto an arm vertex and drag it.
+
+    ``scan_tree`` is a prebuilt cKDTree over ``scan_verts`` — pass it to
+    skip rebuilding the (large) tree every call.
+
+    smplx_verts: (V_smplx, 3) — differentiable.
+    scan_verts:  (V_scan, 3)  — fixed tensor on the same device.
+    """
+    # scan → mesh only. A thresholded mesh→scan term was tried but the
+    # fused 4-shell cloud is a ~2-3 cm-thick noisy band (per-shell ICP
+    # rmse ~2 cm); mesh→scan then hugs the band's *outer* envelope and
+    # inflates every girth +5-7 cm. One-directional keeps the girths
+    # accurate; the sagittal-profile error is addressed upstream by
+    # tighter shell registration, not here.
+    mv = smplx_verts if mesh_mask is None else smplx_verts[mesh_mask]
+    with torch.no_grad():
+        _, idx = cKDTree(mv.detach().cpu().numpy()).query(
+            scan_verts.detach().cpu().numpy())
+    return ((scan_verts - mv[idx]) ** 2).sum(-1).mean()
+
+
 def shape_prior(betas: torch.Tensor) -> torch.Tensor:
     """L2 prior on betas — SMPLify-X uses torch.sum(self.shape_prior(betas))
     with a learned MoG; we use plain L2 (Gaussian, sigma=1) which matches the

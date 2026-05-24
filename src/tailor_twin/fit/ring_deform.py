@@ -112,6 +112,82 @@ def apply_scale_profile(
     return verts
 
 
+def apply_anisotropic_profile(
+    verts: np.ndarray,
+    y_levels: np.ndarray,
+    x_scales: np.ndarray,
+    z_scales: np.ndarray,
+    region_mask: np.ndarray | None = None,
+    ramp_m: float = 0.10,
+) -> np.ndarray:
+    """Continuous *anisotropic* scale profile — X and Z scaled per Y by
+    independent factors. This is the silhouette-fit deformation.
+
+    ``apply_scale_profile`` scales X and Z by the *same* factor, so a
+    slice keeps its SMPL-X front/back-to-width aspect ratio and only its
+    girth changes. Here X (left-right body width) and Z (front-back
+    depth) get separate control curves: ``x_scales`` is driven by the
+    front photo's silhouette width, ``z_scales`` by the side photo's
+    depth. The slice's cross-section therefore takes the aspect ratio
+    *measured from the two photos*, not the parametric model's guess —
+    which is the whole point of a 3DLook-style silhouette fit.
+
+    Control points (``y_levels`` / ``x_scales`` / ``z_scales``) are
+    interpolated piecewise-linearly in Y; outside the range each scale
+    cosine-ramps back to 1.0 over ``ramp_m`` so the deformed torso
+    blends into undeformed neighbours. The radial origin per Y is the
+    region's XZ centroid, interpolated between control slices, so the
+    cross-section stays centred as it is reshaped.
+
+    A control point may be NaN in ``x_scales`` or ``z_scales`` — that
+    axis simply has no usable measurement at that Y (e.g. a front-view
+    torso width hidden by a fused arm). NaN points are dropped from that
+    axis's curve; the surrounding valid points interpolate across the
+    gap. The other axis is unaffected."""
+    verts = verts.copy()
+    order = np.argsort(y_levels)
+    ys = np.asarray(y_levels, dtype=np.float64)[order]
+    sx = np.asarray(x_scales, dtype=np.float64)[order]
+    sz = np.asarray(z_scales, dtype=np.float64)[order]
+
+    vy = verts[:, 1]
+
+    def _profile(ys_all: np.ndarray, ss_all: np.ndarray) -> np.ndarray:
+        keep = np.isfinite(ss_all)
+        if not np.any(keep):
+            return np.ones_like(vy)
+        ya, ss = ys_all[keep], ss_all[keep]
+        prof = np.interp(vy, ya, ss, left=ss[0], right=ss[-1])
+        below = vy < ya[0]
+        above = vy > ya[-1]
+        d_below = np.clip((ya[0] - vy[below]) / ramp_m, 0, 1)
+        prof[below] = 1.0 + (ss[0] - 1.0) * 0.5 * (1 + np.cos(np.pi * d_below))
+        d_above = np.clip((vy[above] - ya[-1]) / ramp_m, 0, 1)
+        prof[above] = 1.0 + (ss[-1] - 1.0) * 0.5 * (1 + np.cos(np.pi * d_above))
+        if region_mask is not None:
+            prof = np.where(region_mask, prof, 1.0)
+        return prof
+
+    prof_x = _profile(ys, sx)
+    prof_z = _profile(ys, sz)
+
+    # Per-Y XZ centroid of the region, interpolated between control
+    # slices, so the radial origin tracks the body centreline.
+    torso = verts[region_mask] if region_mask is not None else verts
+    cx = np.interp(vy, ys,
+                   [torso[np.abs(torso[:, 1] - y) < 0.03][:, 0].mean()
+                    if np.any(np.abs(torso[:, 1] - y) < 0.03) else 0.0
+                    for y in ys])
+    cz = np.interp(vy, ys,
+                   [torso[np.abs(torso[:, 1] - y) < 0.03][:, 2].mean()
+                    if np.any(np.abs(torso[:, 1] - y) < 0.03) else 0.0
+                    for y in ys])
+
+    verts[:, 0] = cx + (verts[:, 0] - cx) * prof_x
+    verts[:, 2] = cz + (verts[:, 2] - cz) * prof_z
+    return verts
+
+
 def apply_radial_scale(
     verts: np.ndarray,
     y_level: float,

@@ -27,6 +27,7 @@ from .losses import (
     angle_prior_elbow_knee,
     chamfer_bidirectional,  # noqa: F401  — kept for backwards compatibility
     chamfer_point_to_surface,
+    chamfer_scan_to_mesh,
     crop_scan_for_chamfer,
     displacement_l2,
     displacement_laplacian,
@@ -51,6 +52,15 @@ class FitConfig:
     # iters bumped). Captures broad shape error (e.g. pelvis bulge) without
     # baking high-frequency scan noise into D. Implies use_displacement.
     use_smooth_displacement: bool = False
+    # Partial-cloud mode: a single-view pointmap is only a front (or side)
+    # shell. Use a one-directional scan→mesh chamfer so the unobserved
+    # mesh regions are not collapsed toward the seen surface.
+    partial_cloud: bool = False
+    # Lock the body to a canonical A-pose (shoulder angle, degrees) and
+    # fit only global_orient + transl + betas — never body_pose. The
+    # chamfer cloud must be arm-free; the result is a consistent,
+    # pose-normalized A-pose body for measurement.
+    canonical_pose_deg: float | None = None
     vposer_ckpt: str | None = "data/vposer/vposer_v1_0/snapshots/TR00_E096.pt"
     # Crop hair/floor from the chamfer target — see losses.crop_scan_for_chamfer.
     crop_above_y_frac: float = 0.97
@@ -157,8 +167,29 @@ def fit_scan(
         batch_size=1,
     ).to(device)
 
+    # Canonical A-pose: lock body_pose, never optimize it. Restrict the
+    # chamfer to non-arm vertices — the cloud is arm-free, so an arm
+    # vertex must not be allowed to snap onto a torso scan point.
+    mesh_keep = None
+    if cfg.canonical_pose_deg is not None:
+        from .refine_to_tape import _build_a_pose
+        ap = _build_a_pose(cfg.canonical_pose_deg).reshape(1, -1)
+        body_model.body_pose = torch.nn.Parameter(
+            torch.from_numpy(ap.astype(np.float32)).to(device),
+            requires_grad=False)
+        from ..measure.regions import region_vertex_mask
+        arm = (region_vertex_mask(("left_arm",),
+                                  model_folder=cfg.model_folder,
+                                  gender=cfg.gender)
+               | region_vertex_mask(("right_arm",),
+                                    model_folder=cfg.model_folder,
+                                    gender=cfg.gender))
+        mesh_keep = torch.from_numpy(~arm).to(device)
+
     vposer = None
-    if cfg.vposer_ckpt is not None and Path(cfg.vposer_ckpt).exists():
+    if cfg.canonical_pose_deg is not None:
+        pass  # pose locked — VPoser not used
+    elif cfg.vposer_ckpt is not None and Path(cfg.vposer_ckpt).exists():
         vposer = VPoserWrapper(cfg.vposer_ckpt, device=cfg.device)
         if verbose:
             print(f"loaded VPoser from {cfg.vposer_ckpt}")
@@ -237,7 +268,19 @@ def fit_scan(
     final_loss = float("inf")
 
     stages = cfg.stage_weights
-    if cfg.use_smooth_displacement:
+    if cfg.canonical_pose_deg is not None:
+        # Pose is locked — fit rigid alignment then shape only.
+        stages = [
+            dict(chamfer=1.0, shape=0.0, pose=0.0, angle=0.0, iters=25,
+                 unfreeze=("global_orient", "transl"), use_vposer=False),
+            dict(chamfer=1.0, shape=0.01, pose=0.0, angle=0.0, iters=40,
+                 unfreeze=("global_orient", "transl", "betas"),
+                 use_vposer=False),
+            dict(chamfer=1.0, shape=0.001, pose=0.0, angle=0.0, iters=90,
+                 unfreeze=("global_orient", "transl", "betas"),
+                 use_vposer=False),
+        ]
+    elif cfg.use_smooth_displacement:
         # Keep parametric stages + ONLY the first D stage (heavy Lap smooth).
         # Bump iters to converge under heavy smoothness regularizer.
         param_stages = [s for s in stages if "d" not in s.get("unfreeze", ())]
@@ -289,7 +332,10 @@ def fit_scan(
             else:
                 out = body_model(return_full_pose=False)
             v = out.vertices[0] + d_param  # SMPL-X + per-vertex displacement
-            if scan_scene is not None:
+            if cfg.partial_cloud:
+                l_chamfer = chamfer_scan_to_mesh(
+                    v, scan_t, mesh_keep, scan_tree=scan_tree)
+            elif scan_scene is not None:
                 l_chamfer = chamfer_point_to_surface(v, scan_scene, scan_t)
             else:
                 l_chamfer = chamfer_bidirectional(v, scan_t, scan_tree)

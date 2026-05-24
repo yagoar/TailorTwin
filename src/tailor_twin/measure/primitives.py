@@ -1007,19 +1007,31 @@ class TapeLoop:
     regions: tuple[str, ...] = ("torso",)
 
     def _planar_loop(self, verts, faces, landmarks: LandmarkSet) -> np.ndarray | None:
-        """Closed planar body loop at plane_y. With no region mask the
-        slice produces a closed manifold loop that may also envelop
-        nearby limbs (at A-pose, the arm region is topologically fused
-        to the torso at the underarm) — that's fine because the consumer
-        (_back_arc / _front_arch) restricts to the XZ convex hull, which
-        drops any arm-side excursions."""
+        """Closed planar torso loop at plane_y.
+
+        Slicing is restricted to triangles inside `regions` (default
+        torso) via the SMPL-X skinning-weight vertex mask. That mask is
+        fixed on the model topology, so the torso↔arm cut lands at the
+        same anatomical place for every figure — independent of betas
+        and pose. The arm is dropped before the slice; the armhole
+        leaves a notch the downstream XZ hull bridges, exactly as a
+        taut tape does across the underarm hollow."""
         plane_y = landmarks[self.plane_landmark][1]
         origin = np.array([0.0, plane_y, 0.0])
-        segs = slice_mesh(verts, faces, origin, _y_axis())
+        mask = region_vertex_mask(self.regions) if self.regions else None
+        segs = slice_mesh(verts, faces, origin, _y_axis(), vertex_mask=mask,
+                          strict_mask=True)
         if not segs:
             return None
-        loops = _build_loops(segs)
-        return _pick_torso_loop(loops)
+        loop = _pick_torso_loop(_build_loops(segs))
+        if loop is not None:
+            return loop
+        # Dropping the arm opens the torso surface at the armholes, so
+        # at underarm height no closed loop survives the stitch. The
+        # half-hull consumer only needs the planar point cloud (it takes
+        # a convex hull, which bridges the armhole gap exactly as a taut
+        # tape does) — so fall back to the raw segment points.
+        return np.vstack(segs)
 
     def _half_hull(self, verts, faces, landmarks: LandmarkSet,
                     side: str) -> np.ndarray | None:
@@ -1027,20 +1039,16 @@ class TapeLoop:
         side="back" -> Z<midZ half, traversed L -> R through CB.
         side="front" -> Z>midZ half, traversed R -> L through CF.
         Convex-hulling drops CF/CB concavities the way a taut tape
-        would. Loop points beyond the lateral underarm endpoints are
-        dropped first so the planar slice cannot wrap into a fused
-        arm cross-section at A-pose.
+        would. The arm is already excluded by the torso vertex mask in
+        _planar_loop, so the loop is torso-only — no geometric x-clip
+        (a clip keyed off the underarm landmark would trim real torso
+        on a wide figure).
         """
         loop = self._planar_loop(verts, faces, landmarks)
         if loop is None or len(loop) < 6:
             return None
         L = landmarks[self.side_endpoints[0]]
         R = landmarks[self.side_endpoints[1]]
-        x_lim = max(abs(L[0]), abs(R[0])) + 0.005
-        keep = np.abs(loop[:, 0]) <= x_lim
-        loop = loop[keep]
-        if len(loop) < 6:
-            return None
         try:
             hidx = ConvexHull(loop[:, [0, 2]]).vertices  # CCW
         except HULL_ERRORS:

@@ -99,6 +99,60 @@ def decimate(
     return mesh.simplify_quadric_decimation(target_number_of_triangles=target_tris)
 
 
+def rescale_to_stature(
+    mesh: o3d.geometry.TriangleMesh,
+    height_m: float,
+    *,
+    up_axis: int = 1,
+    verbose: bool = True,
+) -> tuple[o3d.geometry.TriangleMesh, float]:
+    """Uniformly rescale ``mesh`` so its vertical extent equals ``height_m``.
+
+    Absolute metric scale comes from the LiDAR depth, but visual-inertial
+    odometry drift over a multi-loop capture leaves a small *global* scale
+    error baked into the fused mesh. One tape-measured standing height is a
+    hard anchor that removes it: we scale the whole mesh isotropically so the
+    floor→crown extent along the gravity-up axis matches the real number.
+
+    Isotropic (not Y-only) on purpose — odometry scale error is global, so a
+    single uniform factor corrects it without distorting girths. A Y-only
+    scale would stretch heights while leaving widths wrong.
+
+    ARKit's world frame is gravity-aligned with +Y up, so ``up_axis=1`` is the
+    stature axis. The mesh must cover crown→floor: if the capture missed the
+    head or feet the measured extent is short and the factor is wrong, so this
+    warns when the correction is implausibly large.
+
+    Returns ``(scaled_mesh, factor)``. ``factor`` near 1.0 means the raw fuse
+    was already well-scaled (good odometry); a large deviation flags drift.
+    """
+    v = np.asarray(mesh.vertices)
+    if v.size == 0:
+        if verbose:
+            print("  rescale: empty mesh, skipped")
+        return mesh, 1.0
+    extent = float(v[:, up_axis].max() - v[:, up_axis].min())
+    if extent <= 1e-6:
+        if verbose:
+            print(f"  rescale: degenerate up-axis extent {extent:.4f} m, skipped")
+        return mesh, 1.0
+    factor = float(height_m) / extent
+    if not (0.5 < factor < 2.0) and verbose:
+        print(f"  rescale: WARNING factor={factor:.3f} (mesh extent "
+              f"{extent*100:.1f} cm vs target {height_m*100:.1f} cm) — "
+              "capture may be missing the crown or feet; height anchor "
+              "unreliable")
+    # Uniform scale about the floor (min up-axis) so the feet stay grounded.
+    center = v.min(axis=0).astype(np.float64)
+    out = o3d.geometry.TriangleMesh(mesh)
+    out.scale(factor, center=center)
+    out.compute_vertex_normals()
+    if verbose:
+        print(f"  rescale:       extent {extent*100:.1f} cm → "
+              f"{height_m*100:.1f} cm (factor {factor:.4f})")
+    return out, factor
+
+
 def cleanup_mesh(
     mesh: o3d.geometry.TriangleMesh,
     *,

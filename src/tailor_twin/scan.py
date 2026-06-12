@@ -44,12 +44,13 @@ from tailor_twin.preprocess.waist_string import (
     COLOR_PRESETS,
     detect_waist_y,
 )
-from tailor_twin.reconstruct.cleanup import cleanup_mesh
+from tailor_twin.reconstruct.cleanup import cleanup_mesh, rescale_to_stature
 from tailor_twin.reconstruct.tsdf import (
     DEFAULT_SDF_TRUNC_M,
     DEFAULT_VOXEL_M,
     FusionInput,
     fuse_frames,
+    fuse_frames_posegraph,
     save_mesh_obj,
 )
 
@@ -112,6 +113,10 @@ def run(
     alpha_threshold: float,
     intrinsics_native_size: tuple[int, int] | None,
     skip_fusion: bool,
+    pose_graph: bool,
+    keyframe_stride: int,
+    height_cm: float | None,
+    tape_anchors: Path | None,
     model_folder: str,
     gender: str,
     num_betas: int,
@@ -139,7 +144,26 @@ def run(
 
     # ---- 1. Stray → segmented/filtered frames → TSDF mesh.
     if not skip_fusion:
-        print(f"[1/5] TSDF fusion (backend={seg_backend}, voxel={voxel_m*1000:.1f}mm)")
+        # Stray reports fx/fy/cx/cy in the RGB camera's native resolution
+        # (e.g. 1920x1440), but the depth map is 256x192. Open3D needs the
+        # intrinsics in the depth pixel grid, so the native size must be
+        # known to rescale. If the caller didn't pass it, read it straight
+        # from rgb.mp4 — this is always the resolution Stray's intrinsics
+        # are expressed in. Without this the projection is off by the
+        # res ratio (~7.5x) and the fuse shatters into fragments.
+        if intrinsics_native_size is None:
+            import cv2
+            _cap = cv2.VideoCapture(str(capture / "rgb.mp4"))
+            _w = int(_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            _h = int(_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            _cap.release()
+            if _w > 0 and _h > 0:
+                intrinsics_native_size = (_w, _h)
+                print(f"  intrinsics native size auto-detected from rgb.mp4: "
+                      f"{_w}x{_h} (depth is 256x192)")
+        mode = "pose-graph" if pose_graph else "raw-odometry"
+        print(f"[1/5] TSDF fusion (backend={seg_backend}, "
+              f"voxel={voxel_m*1000:.1f}mm, {mode})")
         inputs = _iter_fusion_inputs(
             capture,
             seg_backend=seg_backend,
@@ -150,14 +174,26 @@ def run(
             bilateral=bilateral,
             alpha_threshold=alpha_threshold,
         )
-        mesh = fuse_frames(
-            inputs,
-            voxel_length=voxel_m,
-            sdf_trunc=sdf_trunc_m,
-            intrinsics_native_size=intrinsics_native_size,
-        )
+        if pose_graph:
+            mesh = fuse_frames_posegraph(
+                inputs,
+                voxel_length=voxel_m,
+                sdf_trunc=sdf_trunc_m,
+                intrinsics_native_size=intrinsics_native_size,
+                keyframe_stride=keyframe_stride,
+            )
+        else:
+            mesh = fuse_frames(
+                inputs,
+                voxel_length=voxel_m,
+                sdf_trunc=sdf_trunc_m,
+                intrinsics_native_size=intrinsics_native_size,
+            )
         print("[2/5] cleanup")
         mesh = cleanup_mesh(mesh)
+        if height_cm is not None:
+            print(f"[2c] rescale to measured height ({height_cm:.1f} cm)")
+            mesh, _factor = rescale_to_stature(mesh, height_cm / 100.0)
         save_mesh_obj(mesh, scan_obj)
         print(f"  wrote {scan_obj}")
     else:
@@ -205,6 +241,51 @@ def run(
     result = fit_scan(sv, cfg=cfg, verbose=True, scan_faces=sf)
     save_fit(result, fit_npz)
     print(f"  wrote {fit_npz}  (chamfer={result.final_chamfer:.6f})")
+
+    # ---- 3b. Tape-anchor girth calibration (optional).
+    # A parametric/scan fit lands within a few cm on each girth. A handful
+    # of tape-measured circumferences pin those rings exactly. Uniform
+    # radial ring-scale corrects girth SIZE while preserving the scan's
+    # real cross-section SHAPE (front/back/width ratio) — tape carries no
+    # shape, only a scalar, so the proportions must come from the scan and
+    # are kept here untouched. Runs before measurement so the downstream
+    # CSV / SMIS / bent-arm all read the calibrated mesh.
+    if tape_anchors is not None:
+        if not tape_anchors.is_file():
+            print(f"ERROR: --tape-anchors file not found: {tape_anchors}")
+            return 1
+        import json as _json
+        anchors = _json.loads(tape_anchors.read_text())
+        if not isinstance(anchors, dict) or not anchors:
+            print(f"ERROR: --tape-anchors must be a non-empty "
+                  f"{{code: cm}} object, got: {anchors!r}")
+            return 1
+        print(f"[3b] tape-anchor ring calibration ({len(anchors)} target(s))")
+        tape_prefix = out_prefix.with_name(out_prefix.name + "_tape")
+        cmd = [
+            sys.executable, "-m", "tailor_twin.fit.ring_deform_cli",
+            str(fit_npz),
+            "--out-prefix", str(tape_prefix),
+            "--num-betas", str(num_betas),
+            "--model-folder", model_folder,
+        ]
+        for code, cm in anchors.items():
+            cmd.extend(["--target", f"{code}={float(cm)}"])
+        if waist_json is not None and waist_json.is_file():
+            from tailor_twin.preprocess.waist_string import WaistStringDetection
+            cmd.extend(["--waist-y",
+                        str(WaistStringDetection.from_json(waist_json).y_m)])
+        r = subprocess.run(cmd)
+        if r.returncode != 0:
+            print(f"  ring_deform_cli failed (exit {r.returncode})")
+            return r.returncode
+        # Redirect downstream measure + bent-arm at the calibrated fit.
+        deformed_npz = tape_prefix.with_name(tape_prefix.name + "_smplx_fit.npz")
+        if not deformed_npz.is_file():
+            print(f"ERROR: expected calibrated fit not written: {deformed_npz}")
+            return 1
+        fit_npz = deformed_npz
+        print(f"  calibrated fit: {fit_npz}")
 
     # ---- 4. Measurement extraction (incl. bent-arm override).
     print("[4/5] measurement extraction")
@@ -297,6 +378,33 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--intrinsics-native-h", type=int, default=None)
     p.add_argument("--skip-fusion", action="store_true",
                    help="Reuse an existing <prefix>_scan.obj.")
+    p.add_argument(
+        "--pose-graph", action="store_true",
+        help="EXPERIMENTAL drift-corrected fusion: refine per-keyframe poses "
+             "via Open3D multiway registration (ICP odometry + loop-closure "
+             "edges → global optimization) before TSDF integration. Removes "
+             "the doubled/ghosted surfaces that raw-odometry integration "
+             "bakes in over a multi-loop capture. Not yet validated on a real "
+             "capture; default off.")
+    p.add_argument(
+        "--keyframe-stride", type=int, default=3,
+        help="With --pose-graph: integrate every Nth kept frame as a "
+             "keyframe. Pairwise ICP is O(n²), so a few dozen keyframes is "
+             "the sweet spot (default 3).")
+    p.add_argument(
+        "--height", type=float, default=None,
+        help="Tape-measured standing height in CM. Uniformly rescales the "
+             "fused mesh so its floor→crown extent matches this number, "
+             "anchoring out odometry global-scale drift. Requires the capture "
+             "to cover crown→feet.")
+    p.add_argument(
+        "--tape-anchors", type=Path, default=None,
+        help="JSON {seamly_code: cm} of tape-measured girths to hit exactly, "
+             "e.g. '{\"G04\": 88, \"G07\": 70, \"G09\": 99}'. Runs a uniform "
+             "radial ring-scale per girth AFTER the fit, correcting girth "
+             "size while preserving the scan's cross-section shape. "
+             "Deformable codes: G03 highbust, G04 bust, G05 underbust, "
+             "G07 waist, G08 highhip, G09 hip.")
     p.add_argument("--model-folder", default="data/body_models")
     p.add_argument("--gender", default="female")
     p.add_argument("--num-betas", type=int, default=300)
@@ -362,6 +470,10 @@ def main(argv: list[str] | None = None) -> int:
         alpha_threshold=args.alpha_threshold,
         intrinsics_native_size=native_size,
         skip_fusion=args.skip_fusion,
+        pose_graph=args.pose_graph,
+        keyframe_stride=args.keyframe_stride,
+        height_cm=args.height,
+        tape_anchors=args.tape_anchors,
         model_folder=args.model_folder,
         gender=args.gender,
         num_betas=args.num_betas,

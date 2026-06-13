@@ -117,6 +117,8 @@ def run(
     keyframe_stride: int,
     height_cm: float | None,
     tape_anchors: Path | None,
+    clean_fit: bool,
+    apose_deg: float,
     model_folder: str,
     gender: str,
     num_betas: int,
@@ -241,6 +243,18 @@ def run(
     result = fit_scan(sv, cfg=cfg, verbose=True, scan_faces=sf)
     save_fit(result, fit_npz)
     print(f"  wrote {fit_npz}  (chamfer={result.final_chamfer:.6f})")
+
+    # ---- 3a. Clean-fit: symmetrize displacement, drop head/hand scan
+    # noise, re-pose to the canonical A-pose. Measurement-safe (no drafting
+    # code reads face/finger geometry; the neck and wrist stay intact) and
+    # produces a pose-normalized, symmetric body for measure + export.
+    if clean_fit and use_displacement:
+        print(f"[3a] clean-fit (symmetrize + head/hand mask + A-pose "
+              f"{apose_deg:.0f}deg)")
+        from tailor_twin.fit.clean_fit import clean_fit_npz
+        clean_fit_npz(
+            fit_npz, fit_npz, model_folder=model_folder, gender=gender,
+            num_betas=num_betas, pose_deg=apose_deg)
 
     # ---- 3b. Tape-anchor girth calibration (optional).
     # A parametric/scan fit lands within a few cm on each girth. A handful
@@ -398,6 +412,16 @@ def main(argv: list[str] | None = None) -> int:
              "anchoring out odometry global-scale drift. Requires the capture "
              "to cover crown→feet.")
     p.add_argument(
+        "--clean-fit", action=argparse.BooleanOptionalAction, default=True,
+        help="Post-fit cleanup: symmetrize the displacement field, zero it "
+             "on the head + hands (removes warped-face / noisy-finger scan "
+             "artifacts; measurement-safe), and re-pose to the canonical "
+             "A-pose. Needs --use-displacement. Default on.")
+    p.add_argument(
+        "--apose-deg", type=float, default=30.0,
+        help="Shoulder angle (degrees from vertical) for the canonical "
+             "A-pose the cleaned/measured body is posed in. Default 30.")
+    p.add_argument(
         "--tape-anchors", type=Path, default=None,
         help="JSON {seamly_code: cm} of tape-measured girths to hit exactly, "
              "e.g. '{\"G04\": 88, \"G07\": 70, \"G09\": 99}'. Runs a uniform "
@@ -474,6 +498,8 @@ def main(argv: list[str] | None = None) -> int:
         keyframe_stride=args.keyframe_stride,
         height_cm=args.height,
         tape_anchors=args.tape_anchors,
+        clean_fit=args.clean_fit,
+        apose_deg=args.apose_deg,
         model_folder=args.model_folder,
         gender=args.gender,
         num_betas=args.num_betas,

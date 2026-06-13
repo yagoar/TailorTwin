@@ -29,6 +29,59 @@ DEFAULT_HOLE_FILL_AREA_M2 = 0.003   # ~3 cm²
 DEFAULT_TARGET_TRIS = 80_000
 
 
+def remove_floor_plane(
+    mesh: o3d.geometry.TriangleMesh,
+    *,
+    dist_thresh_m: float = 0.012,
+    band_frac: float = 0.18,
+    min_inlier_frac: float = 0.04,
+) -> o3d.geometry.TriangleMesh:
+    """Detect and remove a horizontal floor patch fused under the feet.
+
+    Even with body segmentation, depth pixels of the floor the subject
+    stands on leak into the fuse. When that patch connects to the feet it
+    survives ``keep_largest_component`` and inflates the mesh height —
+    which corrupts every height-proportional landmark Y downstream (a fit
+    that stretches to reach the floor reads a wrong stature, and the waist/
+    high-hip slices then cut the body at the wrong level).
+
+    Strategy: RANSAC a plane on the vertices in the bottom ``band_frac`` of
+    the mesh height. If the dominant plane there is near-horizontal (normal
+    within ~25 deg of vertical) and captures a meaningful share of those
+    points, its inliers are floor — remove them. Conservative by design:
+    no horizontal plane found (e.g. clean feet only) → mesh untouched.
+    """
+    V = np.asarray(mesh.vertices)
+    if len(V) < 100:
+        return mesh
+    y = V[:, 1]
+    y_lo, y_hi = float(y.min()), float(y.max())
+    band_top = y_lo + band_frac * (y_hi - y_lo)
+    band_idx = np.where(y <= band_top)[0]
+    if band_idx.size < 50:
+        return mesh
+
+    band_pcd = o3d.geometry.PointCloud()
+    band_pcd.points = o3d.utility.Vector3dVector(V[band_idx])
+    try:
+        plane, inl = band_pcd.segment_plane(
+            distance_threshold=dist_thresh_m, ransac_n=3, num_iterations=500)
+    except Exception:  # noqa: BLE001 — degenerate band
+        return mesh
+    if len(inl) < min_inlier_frac * len(V):
+        return mesh
+    # Horizontal plane => |normal_y| ~ 1. cos(25deg) ~ 0.906.
+    if abs(plane[1]) < 0.906:
+        return mesh
+
+    floor_vert_mask = np.zeros(len(V), dtype=bool)
+    floor_vert_mask[band_idx[np.asarray(inl)]] = True
+    out = o3d.geometry.TriangleMesh(mesh)
+    out.remove_vertices_by_mask(floor_vert_mask)
+    out.remove_unreferenced_vertices()
+    return out
+
+
 def keep_largest_component(
     mesh: o3d.geometry.TriangleMesh,
 ) -> o3d.geometry.TriangleMesh:
@@ -159,15 +212,21 @@ def cleanup_mesh(
     smooth_iters: int = DEFAULT_SMOOTH_ITERS,
     fill_hole_area_m2: float = DEFAULT_HOLE_FILL_AREA_M2,
     target_tris: int = DEFAULT_TARGET_TRIS,
+    remove_floor: bool = True,
     verbose: bool = True,
 ) -> o3d.geometry.TriangleMesh:
-    """Run the full cleanup pipeline (component → fill → smooth → decimate)."""
+    """Run the full cleanup pipeline (floor → component → fill → smooth → decimate)."""
     def _shape(m: o3d.geometry.TriangleMesh) -> str:
         return f"{len(m.vertices)} v / {len(m.triangles)} f"
 
     if verbose:
         print(f"  cleanup in:    {_shape(mesh)}")
-    m = keep_largest_component(mesh)
+    m = mesh
+    if remove_floor:
+        m = remove_floor_plane(m)
+        if verbose:
+            print(f"  remove-floor:  {_shape(m)}")
+    m = keep_largest_component(m)
     if verbose:
         print(f"  keep-largest:  {_shape(m)}")
     m = fill_small_holes(m, max_hole_area_m2=fill_hole_area_m2)

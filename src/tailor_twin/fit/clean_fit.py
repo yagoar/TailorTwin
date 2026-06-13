@@ -30,18 +30,28 @@ from pathlib import Path
 import numpy as np
 
 
-# SMPL-X body-joint indices used for the region spheres.
+# SMPL-X body-joint indices.
 _HEAD_JOINT = 15
+_LEFT_ELBOW = 18
+_RIGHT_ELBOW = 19
 _LEFT_WRIST = 20
 _RIGHT_WRIST = 21
 
 DEFAULT_HEAD_RADIUS_M = 0.12   # sphere around the head joint (keeps the neck)
-DEFAULT_HAND_RADIUS_M = 0.10   # sphere around each wrist (wrist-out = hand)
 # Feather half-width: the displacement fades 1->0 over [radius-feather,
 # radius+feather] instead of switching abruptly, so there is no crease at
 # the boundary (a hard step in the displacement field shows as a seam).
 DEFAULT_HEAD_FEATHER_M = 0.04
-DEFAULT_HAND_FEATHER_M = 0.03
+# Forearm clean fraction: displacement is kept on the proximal part of the
+# forearm (t < FOREARM_T_IN along the elbow->wrist axis) and faded to zero
+# over the distal forearm + hand (t >= FOREARM_T_OUT). The arm carries the
+# largest displacement because the scan-pose arm angle differs from the
+# canonical A-pose it's re-posed into, so that D warps the arm/hand when
+# applied; the hand is unresolvable at 192x256 anyway. Lateral guard keeps
+# the falloff from touching the nearby hip in the A-pose.
+DEFAULT_FOREARM_T_IN = 0.45
+DEFAULT_FOREARM_T_OUT = 1.0
+DEFAULT_FOREARM_LATERAL_M = 0.13
 DEFAULT_APOSE_DEG = 30.0
 
 
@@ -80,27 +90,54 @@ def _sphere_falloff(
     return t * t * (3.0 - 2.0 * t)
 
 
-def head_hand_keep_weight(
+def _forearm_keep(
+    verts: np.ndarray, elbow: np.ndarray, wrist: np.ndarray,
+    *, t_in: float, t_out: float, lateral: float,
+) -> np.ndarray:
+    """Keep weight for one forearm: 1 proximal (near elbow), 0 over the
+    distal forearm + hand, smooth between. Parameterised by the normalised
+    projection ``t`` onto the elbow->wrist axis (0 at elbow, 1 at wrist,
+    >1 beyond into the hand). A lateral-distance guard restricts the effect
+    to vertices near the arm axis so the nearby hip/torso is untouched.
+    """
+    axis = wrist - elbow
+    L2 = float(axis @ axis) or 1e-9
+    rel = verts - elbow
+    t = (rel @ axis) / L2
+    proj = elbow + np.outer(np.clip(t, 0.0, 1.6), axis)
+    lat = np.linalg.norm(verts - proj, axis=1)
+    s = np.clip((t - t_in) / (t_out - t_in), 0.0, 1.0)
+    clean = s * s * (3.0 - 2.0 * s)          # 0 proximal -> 1 distal/hand
+    keep = 1.0 - clean
+    return np.where(lat < lateral, keep, 1.0)
+
+
+def displacement_keep_weight(
     verts: np.ndarray,
     joints: np.ndarray,
     *,
     head_radius: float = DEFAULT_HEAD_RADIUS_M,
-    hand_radius: float = DEFAULT_HAND_RADIUS_M,
     head_feather: float = DEFAULT_HEAD_FEATHER_M,
-    hand_feather: float = DEFAULT_HAND_FEATHER_M,
+    forearm_t_in: float = DEFAULT_FOREARM_T_IN,
+    forearm_t_out: float = DEFAULT_FOREARM_T_OUT,
+    forearm_lateral: float = DEFAULT_FOREARM_LATERAL_M,
 ) -> np.ndarray:
     """Per-vertex displacement-keep weight in [0, 1].
 
-    0 in the head/hand cores (displacement removed → clean template), 1 on
-    the rest of the body (displacement kept), with a smooth feathered
-    transition so there is no crease at the boundary. The weight is the
-    product of one falloff per region, so any core drives the weight to 0
-    while the body away from all regions stays at 1. Spheres (not a Y-cut)
-    keep the neck and shoulders intact.
+    0 where scan displacement is unreliable and re-posing warps it — the
+    head (sphere around the head joint) and the distal forearm + hands
+    (along each elbow->wrist axis) — and 1 on the torso/legs/upper-arm where
+    the fit is trustworthy and measurements live. Smooth transitions
+    throughout (no seam). The weight is the product of the per-region
+    falloffs, so any clean region pulls it to 0 while the rest stays at 1.
     """
     w = _sphere_falloff(verts, joints[_HEAD_JOINT], head_radius, head_feather)
-    w *= _sphere_falloff(verts, joints[_LEFT_WRIST], hand_radius, hand_feather)
-    w *= _sphere_falloff(verts, joints[_RIGHT_WRIST], hand_radius, hand_feather)
+    w *= _forearm_keep(verts, joints[_LEFT_ELBOW], joints[_LEFT_WRIST],
+                       t_in=forearm_t_in, t_out=forearm_t_out,
+                       lateral=forearm_lateral)
+    w *= _forearm_keep(verts, joints[_RIGHT_ELBOW], joints[_RIGHT_WRIST],
+                       t_in=forearm_t_in, t_out=forearm_t_out,
+                       lateral=forearm_lateral)
     return w
 
 
@@ -109,22 +146,17 @@ def clean_displacement(
     verts: np.ndarray,
     joints: np.ndarray,
     sym: np.ndarray,
-    *,
-    head_radius: float = DEFAULT_HEAD_RADIUS_M,
-    hand_radius: float = DEFAULT_HAND_RADIUS_M,
-    head_feather: float = DEFAULT_HEAD_FEATHER_M,
-    hand_feather: float = DEFAULT_HAND_FEATHER_M,
+    **kw,
 ) -> np.ndarray:
-    """Symmetrize the displacement, then feather it to zero on head + hands.
+    """Symmetrize the displacement, then feather it to zero on the head +
+    distal forearm/hands.
 
     The feathered weight avoids the seam a hard mask leaves: the
-    displacement ramps smoothly to zero across the region boundary, so the
-    surface stays continuous into the cleaned head/hand template.
+    displacement ramps smoothly to zero across each region, so the surface
+    stays continuous into the cleaned template.
     """
     D_sym = symmetrize_displacement(D, sym)
-    w = head_hand_keep_weight(
-        verts, joints, head_radius=head_radius, hand_radius=hand_radius,
-        head_feather=head_feather, hand_feather=hand_feather)
+    w = displacement_keep_weight(verts, joints, **kw)
     return D_sym * w[:, None]
 
 
@@ -137,7 +169,6 @@ def clean_fit_npz(
     num_betas: int = 300,
     pose_deg: float = DEFAULT_APOSE_DEG,
     head_radius: float = DEFAULT_HEAD_RADIUS_M,
-    hand_radius: float = DEFAULT_HAND_RADIUS_M,
     verbose: bool = True,
 ) -> Path:
     """Load a fit npz, clean its displacement, re-pose to canonical A-pose,
@@ -185,16 +216,14 @@ def clean_fit_npz(
          if "displacement" in fit.files else np.zeros_like(verts))
     if D.shape == verts.shape and np.any(D):
         D_clean = clean_displacement(D, verts, joints, sym,
-                                     head_radius=head_radius,
-                                     hand_radius=hand_radius)
+                                     head_radius=head_radius)
         if verbose:
             asym = np.abs(D - symmetrize_displacement(D, sym)).mean() * 1000
-            w = head_hand_keep_weight(verts, joints, head_radius=head_radius,
-                                      hand_radius=hand_radius)
+            w = displacement_keep_weight(verts, joints, head_radius=head_radius)
             nz = int((w < 0.5).sum())
             print(f"  clean-fit: symmetrized D (mean asym {asym:.2f}mm), "
-                  f"feathered out ~{nz} head/hand verts, canonical A-pose "
-                  f"{pose_deg:.0f}deg")
+                  f"feathered out ~{nz} head/forearm/hand verts, canonical "
+                  f"A-pose {pose_deg:.0f}deg")
     else:
         D_clean = np.zeros_like(verts)
         if verbose:

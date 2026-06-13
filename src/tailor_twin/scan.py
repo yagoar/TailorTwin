@@ -24,6 +24,7 @@ useful when only re-running the fit/measure stages.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -116,7 +117,7 @@ def run(
     pose_graph: bool,
     keyframe_stride: int,
     height_cm: float | None,
-    tape_anchors: Path | None,
+    tape_anchors: dict[str, float] | None,
     clean_fit: bool,
     apose_deg: float,
     model_folder: str,
@@ -264,16 +265,8 @@ def run(
     # shape, only a scalar, so the proportions must come from the scan and
     # are kept here untouched. Runs before measurement so the downstream
     # CSV / SMIS / bent-arm all read the calibrated mesh.
-    if tape_anchors is not None:
-        if not tape_anchors.is_file():
-            print(f"ERROR: --tape-anchors file not found: {tape_anchors}")
-            return 1
-        import json as _json
-        anchors = _json.loads(tape_anchors.read_text())
-        if not isinstance(anchors, dict) or not anchors:
-            print(f"ERROR: --tape-anchors must be a non-empty "
-                  f"{{code: cm}} object, got: {anchors!r}")
-            return 1
+    if tape_anchors:
+        anchors = tape_anchors
         print(f"[3b] tape-anchor ring calibration ({len(anchors)} target(s))")
         tape_prefix = out_prefix.with_name(out_prefix.name + "_tape")
         cmd = [
@@ -363,13 +356,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out-prefix", type=Path, required=True,
                    help="e.g. data/results/<name>")
     p.add_argument(
-        "--seg-backend", default="depth_threshold",
+        "--seg-backend", default="rvm",
         choices=sorted({"rembg", "rvm", "depth_threshold"}),
-        help=("body-segmentation backend. "
+        help=("body-segmentation backend (default rvm). "
               f"available now: {available_backends()}. "
-              "depth_threshold = depth-only, no extra deps. "
-              "rembg = `pip install rembg` (~180 MB, U2Net body matting). "
-              "rvm = torch.hub RVM mobilenetv3 (best edges)."))
+              "rvm = torch.hub RVM mobilenetv3 — isolates the person from "
+              "floor/walls (REQUIRED for a clean body; depth_threshold "
+              "keeps everything in the depth window and the body fragments). "
+              "rembg = `pip install rembg` (~180 MB, U2Net). "
+              "depth_threshold = depth-only, no extra deps (debug only)."))
     p.add_argument("--voxel", type=float, default=DEFAULT_VOXEL_M)
     p.add_argument("--sdf-trunc", type=float, default=DEFAULT_SDF_TRUNC_M)
     p.add_argument("--frame-stride", type=int, default=1,
@@ -430,6 +425,12 @@ def main(argv: list[str] | None = None) -> int:
              "Deformable codes: G03 highbust, G04 bust, G05 underbust, "
              "G07 waist, G08 highhip, G09 hip; legs M03 thigh, M05 knee, "
              "M07 calf, M09 ankle (each leg scaled independently).")
+    p.add_argument(
+        "--tape-anchor", action="append", default=None, metavar="CODE=CM",
+        help="Inline tape girth target, repeatable, e.g. --tape-anchor "
+             "G04=87.5 --tape-anchor M07=34. Merged with --tape-anchors; "
+             "same deformable codes. Lets the GUI pass anchors without a "
+             "temp file.")
     p.add_argument("--model-folder", default="data/body_models")
     p.add_argument("--gender", default="female")
     p.add_argument("--num-betas", type=int, default=300)
@@ -481,6 +482,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.intrinsics_native_w and args.intrinsics_native_h:
         native_size = (args.intrinsics_native_w, args.intrinsics_native_h)
 
+    # Tape anchors: merge the JSON file (--tape-anchors) with inline
+    # --tape-anchor CODE=cm flags into one {code: cm} dict.
+    anchor_dict: dict[str, float] = {}
+    if args.tape_anchors is not None:
+        if not args.tape_anchors.is_file():
+            raise SystemExit(
+                f"--tape-anchors file not found: {args.tape_anchors}")
+        loaded = json.loads(args.tape_anchors.read_text())
+        if not isinstance(loaded, dict):
+            raise SystemExit("--tape-anchors must be a {code: cm} JSON object")
+        anchor_dict.update({str(k): float(v) for k, v in loaded.items()})
+    for spec in (args.tape_anchor or []):
+        if "=" not in spec:
+            raise SystemExit(f"--tape-anchor expects CODE=cm, got {spec!r}")
+        code, val = spec.split("=", 1)
+        anchor_dict[code.strip()] = float(val)
+
     return run(
         capture=args.capture,
         out_prefix=args.out_prefix,
@@ -498,7 +516,7 @@ def main(argv: list[str] | None = None) -> int:
         pose_graph=args.pose_graph,
         keyframe_stride=args.keyframe_stride,
         height_cm=args.height,
-        tape_anchors=args.tape_anchors,
+        tape_anchors=anchor_dict or None,
         clean_fit=args.clean_fit,
         apose_deg=args.apose_deg,
         model_folder=args.model_folder,

@@ -29,6 +29,23 @@ WAIST_COLORS: tuple[str, ...] = (
     "magenta", "yellow", "blue", "orange",
 )
 
+# Optional tape-measured girths the GUI can collect to calibrate the fit
+# exactly (passed to the pipeline as --tape-anchor CODE=cm). Each tuple is
+# (form field name, seamly code, human label). Torso girths scale about the
+# torso centreline; the leg girths (M*) scale per-leg.
+TAPE_GIRTHS: tuple[tuple[str, str, str], ...] = (
+    ("highbust",  "G03", "High bust"),
+    ("bust",      "G04", "Bust"),
+    ("underbust", "G05", "Underbust"),
+    ("waist",     "G07", "Waist"),
+    ("highhip",   "G08", "High hip"),
+    ("hip",       "G09", "Hip"),
+    ("thigh",     "M03", "Thigh"),
+    ("knee",      "M05", "Knee"),
+    ("calf",      "M07", "Calf"),
+    ("ankle",     "M09", "Ankle"),
+)
+
 # Gender values match SeamlyMe (Seamly2D/src/libs/vformat/measurements.cpp):
 # {"male", "female", "unknown"}. The HTML lists all three; availability
 # is derived from which SMPL-X model files actually sit under

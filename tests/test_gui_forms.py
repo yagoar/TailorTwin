@@ -176,6 +176,48 @@ def test_build_cmd_full(tmp_path: Path) -> None:
     assert "--pattern-system" not in cmd
 
 
+def test_build_cmd_height_and_girths(tmp_path: Path) -> None:
+    cmd = build_cmd(_good(
+        tmp_path, height="170", bust="87.5", waist="69", calf="34",
+    ))
+    assert ["--height", "170"] == [
+        cmd[cmd.index("--height")], cmd[cmd.index("--height") + 1]]
+    # each filled girth becomes one --tape-anchor CODE=cm
+    anchors = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--tape-anchor"]
+    assert "G04=87.5" in anchors
+    assert "G07=69" in anchors
+    assert "M07=34" in anchors  # leg girth
+    # blank girths are not emitted
+    assert not any(a.startswith("G09=") for a in anchors)
+
+
+def test_build_cmd_no_calibration_when_blank(tmp_path: Path) -> None:
+    cmd = build_cmd(_good(tmp_path))
+    assert "--height" not in cmd
+    assert "--tape-anchor" not in cmd
+
+
+def test_build_cmd_pose_graph_and_clean_fit(tmp_path: Path) -> None:
+    cmd = build_cmd(_good(tmp_path, pose_graph="on"))
+    assert "--pose-graph" in cmd
+    # clean_fit default on (checkbox checked) -> no opt-out flag
+    assert "--no-clean-fit" not in build_cmd(_good(tmp_path, clean_fit="on"))
+    # clean_fit present-but-unchecked (key absent from POST) -> opt-out.
+    # Browsers omit unchecked boxes, so simulate the hidden marker.
+    cmd_off = build_cmd(_good(tmp_path, clean_fit=""))
+    assert "--no-clean-fit" in cmd_off
+
+
+def test_validate_bad_height(tmp_path: Path) -> None:
+    err = validate(_good(tmp_path, height="-5"))
+    assert err and "height" in err.lower()
+
+
+def test_validate_bad_girth(tmp_path: Path) -> None:
+    err = validate(_good(tmp_path, calf="abc"))
+    assert err and "calf" in err.lower()
+
+
 # ---------------------------------------------------------------------------
 # Runner state machine
 # ---------------------------------------------------------------------------

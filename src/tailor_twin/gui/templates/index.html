@@ -94,6 +94,43 @@
     </div>
 
     <div class="card">
+      <h2>Calibration</h2>
+      <div class="grid">
+        <label class="field-label" for="height">Height (cm)</label>
+        <div>
+          <input id="height" name="height" type="number" step="0.1" min="0"
+                 placeholder="e.g. 170">
+          <div class="help">Optional but recommended. Anchors the mesh
+            scale, removing odometry drift.</div>
+        </div>
+      </div>
+      <div class="grid">
+        <label class="field-label">Tape girths (cm)</label>
+        <div>
+          <div class="chips">
+            {% for field, code, label in girths %}
+            <label class="chip girth">{{ label }}
+              <input name="{{ field }}" type="number" step="0.1" min="0"
+                     placeholder="cm" inputmode="decimal">
+            </label>
+            {% endfor %}
+          </div>
+          <div class="help">Optional. Any you fill are hit exactly; the rest
+            stay parametric. Leg girths scale each leg independently.</div>
+        </div>
+      </div>
+      <div class="grid">
+        <label class="field-label">Fit options</label>
+        <div class="chips">
+          <label class="chip"><input type="checkbox" name="clean_fit" checked>
+            Clean fit (symmetrise, A-pose)</label>
+          <label class="chip"><input type="checkbox" name="pose_graph">
+            Drift-correct fusion (slower)</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>Export</h2>
       <div class="grid">
         <label class="field-label">Artifacts</label>

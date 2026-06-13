@@ -22,6 +22,7 @@ from .config import (
     DEFAULT_RESULTS_DIR,
     GENDERS,
     REPO_ROOT,
+    TAPE_GIRTHS,
     WAIST_COLORS,
 )
 from .forms import build_cmd, validate
@@ -42,6 +43,7 @@ def create_app(runner: Runner | None = None) -> Flask:
             today=dt.date.today().isoformat(),
             colors=WAIST_COLORS,
             genders=GENDERS,
+            girths=TAPE_GIRTHS,
             default_captures=str(DEFAULT_CAPTURES_DIR),
             default_results=str(DEFAULT_RESULTS_DIR),
         )

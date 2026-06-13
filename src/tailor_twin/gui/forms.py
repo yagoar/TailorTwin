@@ -14,9 +14,22 @@ from .config import (
     ENABLED_GENDERS,
     PIPELINE_PY,
     RUN_SCAN_ARGS,
+    TAPE_GIRTHS,
     VALID_GENDERS,
     WAIST_COLORS,
 )
+
+
+def _parse_pos_float(raw: str | None) -> float | None:
+    """Parse a positive float from a form field; None if blank/invalid."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        v = float(s)
+    except ValueError:
+        return None
+    return v if v > 0 else None
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -76,6 +89,15 @@ def validate(form: Mapping[str, str]) -> str | None:
     bday = (form.get("birthday") or "").strip()
     if bday and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", bday):
         return f"Birthday must be yyyy-mm-dd: {bday!r}"
+
+    # Height + girths, when filled, must be positive numbers.
+    if (form.get("height") or "").strip() and _parse_pos_float(
+            form.get("height")) is None:
+        return f"Height must be a positive number (cm): {form.get('height')!r}"
+    for field, _code, label in TAPE_GIRTHS:
+        raw = (form.get(field) or "").strip()
+        if raw and _parse_pos_float(raw) is None:
+            return f"{label} must be a positive number (cm): {raw!r}"
     return None
 
 
@@ -103,6 +125,26 @@ def build_cmd(form: Mapping[str, str]) -> list[str]:
     color = (form.get("color") or "none").strip()
     if color != "none":
         cmd.extend(["--waist-color", color])
+
+    # Height anchor (scale).
+    height = _parse_pos_float(form.get("height"))
+    if height is not None:
+        cmd.extend(["--height", f"{height:g}"])
+
+    # Tape girth anchors → one --tape-anchor CODE=cm per filled field.
+    for field, code, _label in TAPE_GIRTHS:
+        val = _parse_pos_float(form.get(field))
+        if val is not None:
+            cmd.extend(["--tape-anchor", f"{code}={val:g}"])
+
+    # Drift-corrected fusion (opt-in checkbox).
+    if form.get("pose_graph"):
+        cmd.append("--pose-graph")
+    # Clean-fit (symmetrize + head/hand + A-pose) is on by default in the
+    # pipeline; emit the opt-out only when the box is explicitly unchecked.
+    if "clean_fit" in form and not form.get("clean_fit"):
+        cmd.append("--no-clean-fit")
+
     bday = (form.get("birthday") or "").strip()
     if bday:
         cmd.extend(["--person-birth-date", bday])

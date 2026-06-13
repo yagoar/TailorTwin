@@ -155,8 +155,15 @@ def clean_fit_npz(
 
     fit = np.load(fit_npz)
     g = gender or fit_gender(fit)
+    # flat_hand_mean=False so the un-posed hands take MANO's relaxed mean
+    # pose (a natural slight curl) instead of the flat, splayed default that
+    # reads as "broken fingers". The fit never optimises hand pose and the
+    # 192x256 depth can't resolve fingers, so the relaxed template hand is
+    # the best available — and it's measurement-safe: the finger curl is
+    # distal to the wrist, so wrist girth (L15) and arm length (to the wrist
+    # landmark) are unchanged.
     bm = smplx.create(model_path=model_folder, model_type="smplx", gender=g,
-                      num_betas=num_betas, use_pca=False, flat_hand_mean=True,
+                      num_betas=num_betas, use_pca=False, flat_hand_mean=False,
                       batch_size=1)
 
     sym = build_symmetry_map(

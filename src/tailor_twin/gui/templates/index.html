@@ -122,11 +122,22 @@
       </div>
       <div class="grid">
         <label class="field-label">Fit options</label>
-        <div class="chips">
-          <label class="chip"><input type="checkbox" name="clean_fit" checked>
-            Clean fit (symmetrise, A-pose)</label>
-          <label class="chip"><input type="checkbox" name="pose_graph">
-            Drift-correct fusion (slower)</label>
+        <div>
+          <div class="chips">
+            <label class="chip"><input type="checkbox" name="clean_fit" checked>
+              Clean fit (symmetrise, A-pose)</label>
+            <label class="chip"><input type="checkbox" name="pose_graph">
+              Drift-correct fusion (slower)</label>
+          </div>
+          <div class="help">
+            <b>Clean fit</b> — keep on. Mirrors the body left/right to remove
+            scan noise, swaps the unreadable head &amp; hands for the clean
+            template, and stands it in the A-pose. Doesn't change any
+            measurement; off only to inspect the raw fit.<br>
+            <b>Drift-correct fusion</b> — leave off. Re-aligns the frames to
+            cancel <em>camera</em> drift; only worth it if a mesh comes out
+            doubled/ghosted. Slower, and it can't fix a subject who moved.
+          </div>
         </div>
       </div>
     </div>

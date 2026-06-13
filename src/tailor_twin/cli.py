@@ -93,18 +93,6 @@ def refine_tape_cmd(ctx: typer.Context) -> None:
 
 
 @app.command(
-    name="shapy-import",
-    help="Import SHAPY regressor output(s) (image → SMPL-X betas) as a "
-         "tailor-twin fit_npz. Photos-only front-end: no LiDAR scan.",
-    context_settings={"allow_extra_args": True,
-                       "ignore_unknown_options": True},
-)
-def shapy_import_cmd(ctx: typer.Context) -> None:
-    from tailor_twin.io.shapy_import_cli import main as shapy_import_main
-    raise typer.Exit(shapy_import_main(ctx.args))
-
-
-@app.command(
     name="ring-deform",
     help="Deform a fit's mesh per-ring so PlanarGirth circumferences "
          "(bust/waist/hip/…) hit tape exactly. Geometric edit — no "
@@ -115,71 +103,6 @@ def shapy_import_cmd(ctx: typer.Context) -> None:
 def ring_deform_cmd(ctx: typer.Context) -> None:
     from tailor_twin.fit.ring_deform_cli import main as ring_deform_main
     raise typer.Exit(ring_deform_main(ctx.args))
-
-
-@app.command(
-    name="capture",
-    help="Run the phone capture webapp: gyroscope-gated front + side "
-         "body photos over HTTPS on the LAN. Output feeds silhouette-fit.",
-    context_settings={"allow_extra_args": True,
-                       "ignore_unknown_options": True},
-)
-def capture_cmd(ctx: typer.Context) -> None:
-    from tailor_twin.capture.cli import main as capture_main
-    raise typer.Exit(capture_main(ctx.args))
-
-
-@app.command(
-    name="silhouette-fit",
-    help="Fit an SMPL-X torso to two photos (front + side) 3DLook-style: "
-         "front photo drives per-Y width, side photo drives per-Y depth. "
-         "Measured outline, not a regressed prior.",
-    context_settings={"allow_extra_args": True,
-                       "ignore_unknown_options": True},
-)
-def silhouette_fit_cmd(ctx: typer.Context) -> None:
-    from tailor_twin.fit.silhouette_fit_cli import main as silhouette_main
-    raise typer.Exit(silhouette_main(ctx.args))
-
-
-@app.command(
-    name="pointmap-fit",
-    help="Fit an SMPL-X body to two photos (front + side) using Sapiens2 "
-         "metric pointmaps: width/depth measured in metres, not pixels — "
-         "matches tape girths within ~1 cm with no tape polish.",
-    context_settings={"allow_extra_args": True,
-                       "ignore_unknown_options": True},
-)
-def pointmap_fit_cmd(ctx: typer.Context) -> None:
-    from tailor_twin.fit.pointmap_fit_cli import main as pointmap_main
-    raise typer.Exit(pointmap_main(ctx.args))
-
-
-@app.command(
-    name="dense-fit",
-    help="360° dense chamfer fit: SMPL-X betas + pose pulled onto the "
-         "front/back/left/right pointmap surfaces of a 4-photo capture, "
-         "so every side — depth included — is measured, not prior-guessed.",
-    context_settings={"allow_extra_args": True,
-                       "ignore_unknown_options": True},
-)
-def dense_fit_cmd(ctx: typer.Context) -> None:
-    from tailor_twin.fit.pointmap_dense import main as dense_main
-    raise typer.Exit(dense_main(ctx.args))
-
-
-@app.command(
-    name="fuse-priors",
-    help="Combine a LiDAR-chamfer fit and a SHAPY image-regression fit "
-         "into one SMPL-X fit npz. Best-of-both: LiDAR's scan-specific "
-         "high-order betas + SHAPY's CAESAR-trained anthropometric prior "
-         "on the dominant shape modes.",
-    context_settings={"allow_extra_args": True,
-                       "ignore_unknown_options": True},
-)
-def fuse_priors_cmd(ctx: typer.Context) -> None:
-    from tailor_twin.fit.fuse_priors_cli import main as fuse_priors_main
-    raise typer.Exit(fuse_priors_main(ctx.args))
 
 
 if __name__ == "__main__":

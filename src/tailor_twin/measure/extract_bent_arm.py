@@ -131,9 +131,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {code}: {val:.2f} cm")
 
     # Save bent mesh as an npz with the same key layout as the input
-    # fit so render_measurement_review.py / review_viewer.py can load it
-    # directly. `displacement` is zeroed because it has already been
-    # baked into the saved vertices here.
+    # fit so the measure viewer can load it directly. `displacement` is
+    # zeroed because it has already been baked into the saved vertices here.
     npz_path = args.fit_npz.with_name(args.fit_npz.stem + "_bent_arm.npz")
     bent_pose = fit["body_pose"].copy()
     bent_pose[L_ELBOW_BODY_POSE_INDEX] = pose.elbow_aa

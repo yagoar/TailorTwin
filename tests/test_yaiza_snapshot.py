@@ -60,10 +60,8 @@ def test_modules_importable():
     import tailor_twin.measure.bent_arm  # noqa: F401
     import tailor_twin.measure.cli  # noqa: F401
     import tailor_twin.measure.exports  # noqa: F401
-    import tailor_twin.measure.extractor  # noqa: F401
     import tailor_twin.measure.landmarks  # noqa: F401
     import tailor_twin.measure.primitives  # noqa: F401
-    import tailor_twin.measure.recipes  # noqa: F401
     import tailor_twin.measure.regions  # noqa: F401
     import tailor_twin.measure.seamly_catalog  # noqa: F401
     import tailor_twin.measure.seamly_extractor  # noqa: F401

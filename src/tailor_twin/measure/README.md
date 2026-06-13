@@ -27,12 +27,11 @@ mesh, writes CSV / SMIS / JSON / OBJ artefacts.
 | `primitives.py` | Dataclass recipes: `Height`, `Geodesic`, `PlanarGirth`, `LimbGirth`, `DiagonalSurfacePlumb`, … + viz polyline. |
 | `seamly_catalog.py` | The 245 Seamly catalog codes mapped to recipe instances + formulas + judgment list. |
 | `seamly_extractor.py` | Run `RECIPES` over a mesh → `CatalogReport(values, skipped)`. |
-| `extractor.py` | Run `merged.yaml` (Aldrich + dpm subset) recipes → `ExtractionReport`. Legacy / parallel to seamly_extractor. |
 | `bent_arm.py` | Re-pose SMPL-X with left elbow + shoulder flexed. Shared by CLI override and `extract_bent_arm.py`. |
 | `extract_bent_arm.py` | Standalone re-pose runner; reachable as `tailor-twin bent-arm <fit.npz>` or `python -m tailor_twin.measure.extract_bent_arm`. |
 | `exports.py` | CSV / OBJ / SMIS writers. |
 | `cli.py` | `python -m tailor_twin.measure.cli <fit.npz> [--both] [--save-*]`. |
-| `viewer.py` / `review_viewer.py` | Dash apps for code-by-code visual review. |
+| `viewer.py` | Dash app for code-by-code visual review. |
 
 ## Adding a new measurement
 
@@ -49,8 +48,8 @@ mesh, writes CSV / SMIS / JSON / OBJ artefacts.
    if your new recipe doesn't change existing values, the test
    passes. Update the baseline (and commit it) only when the
    change is intentional.
-5. Open the review viewer (`python -m tailor_twin.measure.review_viewer`)
-   and inspect the new code visually.
+5. Open the viewer (`python -m tailor_twin.measure.viewer`) and
+   inspect the new code visually.
 
 ## Bent-arm
 

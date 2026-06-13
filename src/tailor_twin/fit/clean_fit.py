@@ -42,15 +42,16 @@ DEFAULT_HEAD_RADIUS_M = 0.12   # sphere around the head joint (keeps the neck)
 # radius+feather] instead of switching abruptly, so there is no crease at
 # the boundary (a hard step in the displacement field shows as a seam).
 DEFAULT_HEAD_FEATHER_M = 0.04
-# Forearm clean fraction: displacement is kept on the proximal part of the
-# forearm (t < FOREARM_T_IN along the elbow->wrist axis) and faded to zero
-# over the distal forearm + hand (t >= FOREARM_T_OUT). The arm carries the
-# largest displacement because the scan-pose arm angle differs from the
-# canonical A-pose it's re-posed into, so that D warps the arm/hand when
-# applied; the hand is unresolvable at 192x256 anyway. Lateral guard keeps
-# the falloff from touching the nearby hip in the A-pose.
-DEFAULT_FOREARM_T_IN = 0.45
-DEFAULT_FOREARM_T_OUT = 1.0
+# Hand cut along the elbow->wrist axis: t is the normalised projection
+# (0 at elbow, 1 at the wrist joint, >1 into the hand). Displacement is
+# kept on the whole forearm up to just before the wrist (t < HAND_T_IN) and
+# faded to the clean SMPL-X template hand from the wrist bone down (t >=
+# HAND_T_OUT), with only a small feather straddling the wrist so there is no
+# seam. The hand is unresolvable at 192x256 and its scan displacement is
+# noise; the forearm keeps its real shape. Lateral guard keeps the falloff
+# from touching the nearby hip in the A-pose.
+DEFAULT_FOREARM_T_IN = 0.95
+DEFAULT_FOREARM_T_OUT = 1.05
 DEFAULT_FOREARM_LATERAL_M = 0.13
 DEFAULT_APOSE_DEG = 30.0
 

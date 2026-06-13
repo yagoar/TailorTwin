@@ -107,9 +107,10 @@
       <div class="grid">
         <label class="field-label">Tape girths (cm)</label>
         <div>
-          <div class="chips">
+          <div class="girth-grid">
             {% for field, code, label in girths %}
-            <label class="chip girth">{{ label }}
+            <label class="girth-field">
+              <span>{{ label }}</span>
               <input name="{{ field }}" type="number" step="0.1" min="0"
                      placeholder="cm" inputmode="decimal">
             </label>

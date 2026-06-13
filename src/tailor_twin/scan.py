@@ -428,7 +428,8 @@ def main(argv: list[str] | None = None) -> int:
              "radial ring-scale per girth AFTER the fit, correcting girth "
              "size while preserving the scan's cross-section shape. "
              "Deformable codes: G03 highbust, G04 bust, G05 underbust, "
-             "G07 waist, G08 highhip, G09 hip.")
+             "G07 waist, G08 highhip, G09 hip; legs M03 thigh, M05 knee, "
+             "M07 calf, M09 ankle (each leg scaled independently).")
     p.add_argument("--model-folder", default="data/body_models")
     p.add_argument("--gender", default="female")
     p.add_argument("--num-betas", type=int, default=300)

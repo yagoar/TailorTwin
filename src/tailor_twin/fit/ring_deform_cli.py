@@ -38,6 +38,18 @@ _CODE_TO_LANDMARK = {
     "G09": "hip_level",
 }
 
+# Leg-girth codes: each slices a single lower-limb at a per-leg landmark Y
+# and is deformed PER LEG (each leg scaled about its own centroid). The
+# torso ring deform can't do these — it scales about one shared torso
+# centroid, which would push two separate legs together/apart instead of
+# scaling each girth. Mirrors the PlanarGirth landmarks in seamly_catalog.
+_LEG_CODE_TO_LANDMARK = {
+    "M03": "thigh_at_crotch_left",
+    "M05": "mid_knee_level",
+    "M07": "calf_widest_left",
+    "M09": "ankle_bone_lateral_left",
+}
+
 
 def _parse_target(spec: str) -> tuple[str, float]:
     if "=" not in spec:
@@ -70,11 +82,15 @@ def main(argv: list[str] | None = None) -> int:
     targets_cm = dict(_parse_target(s) for s in args.target)
     # A01 height is handled by a uniform Y-scale, not a ring.
     height_target = targets_cm.pop("A01", None)
+    # Split leg-girth targets out — they need a per-leg deform, not the
+    # shared-centroid torso profile.
+    leg_targets = {c: targets_cm.pop(c) for c in list(targets_cm)
+                   if c in _LEG_CODE_TO_LANDMARK}
     bad = [c for c in targets_cm if c not in _CODE_TO_LANDMARK]
     if bad:
         raise SystemExit(
-            f"codes {bad} not deformable; supported: "
-            f"A01 (height) + {sorted(_CODE_TO_LANDMARK)}")
+            f"codes {bad} not deformable; supported: A01 (height) + "
+            f"{sorted(_CODE_TO_LANDMARK)} + legs {sorted(_LEG_CODE_TO_LANDMARK)}")
 
     fit = np.load(args.fit_npz)
 
@@ -216,6 +232,39 @@ def main(argv: list[str] | None = None) -> int:
             deformed = apply_radial_scale(
                 deformed, ys[0], ring_targets[0].band_m,
                 scales[0], deform_mask)
+
+    # ---- Per-leg girth deform (M03 thigh / M05 knee / M07 calf / M09
+    # ankle). Each leg is scaled about its OWN centroid via the single-
+    # region deform_ring, so the two separate limbs are not pushed
+    # together as a shared-centroid torso ring would do. The body is
+    # symmetrised, so the same target applies to both legs.
+    if leg_targets:
+        from .ring_deform import RingTarget as _RT, deform_ring
+        leg_masks = {
+            side: region_vertex_mask((side,), model_folder=args.model_folder,
+                                     gender=gender)
+            for side in ("left_leg", "right_leg")
+        }
+        for code, target_cm in leg_targets.items():
+            lm_name = _LEG_CODE_TO_LANDMARK[code]
+            for p in range(args.passes):
+                lm = build_landmark_set(
+                    deformed.astype(np.float32), joints=joints, faces=faces,
+                    gender=gender)
+                y = float(lm[lm_name][1])
+                max_resid = 0.0
+                for side in ("left_leg", "right_leg"):
+                    tgt = _RT(code=code, y_level=y, target_cm=target_cm,
+                              band_m=args.band_m)
+                    deformed, before, after = deform_ring(
+                        deformed, tgt, region_mask=leg_masks[side])
+                    if np.isfinite(after):
+                        max_resid = max(max_resid, abs(after - target_cm))
+                    print(f"  leg {code} {side}: {before:.2f} → {after:.2f} cm "
+                          f"(target {target_cm})")
+                if max_resid <= 0.3:
+                    print(f"leg {code} converged pass {p+1}")
+                    break
 
     # Save a fit npz mirroring the source with deformed vertices.
     # Pose fields are overwritten with the canonical A-pose used above

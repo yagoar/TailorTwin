@@ -5,10 +5,10 @@ that repo for the canonical on-disk format. This module follows that
 specification and intentionally avoids inferring fields not documented
 there.
 
-Status: Phase 1 skeleton, validated against the public format document
-only. Pending end-to-end validation against a real capture from the
-user's iPhone. The ``validate_capture`` function asserts every documented
-expectation so any drift between docs and a real capture surfaces loudly.
+Status: validated end-to-end on real iPhone Pro captures (full
+capture → mesh → fit → measurement runs). The ``validate_capture``
+function asserts every documented expectation so any drift between docs
+and a real capture surfaces loudly.
 
 Expected on-disk layout (from the Stray docs)::
 
@@ -30,14 +30,18 @@ Coordinate convention: Stray records ARKit poses, which are right-handed
 with +Y up and the camera looking down -Z, in metres. Poses are returned
 as 4x4 camera-to-world SE(3) matrices.
 
-Open questions to confirm against a real capture (see Phase 1 close-out):
+Resolved against real captures:
 
-* Whether ``odometry.csv`` is 1:1 with the RGB stream (one row per RGB
-  frame) or one row per depth frame.
-* Whether the intrinsics in ``odometry.csv`` are reported in the RGB
-  camera's native resolution or already scaled to the depth resolution.
-* Whether depth filenames are zero-padded 5-digit indices into the
-  odometry row sequence, or use a different convention.
+* ``odometry.csv`` is 1:1 with the RGB stream (one row per RGB frame);
+  each row's ``frame`` column indexes the matching ``depth/<frame>.png``.
+* The intrinsics in ``odometry.csv`` are in the **RGB camera's native
+  resolution** (e.g. 1920×1440), NOT the 256×192 depth grid. Consumers
+  must rescale by the resolution ratio (~7.5×) before projecting depth —
+  ``scan.py`` auto-detects the RGB size from ``rgb.mp4`` and passes it as
+  ``intrinsics_native_size`` to the TSDF fuse. Skipping this misprojects
+  every pixel and the fuse shatters into fragments.
+* Depth filenames are zero-padded indices matching the odometry ``frame``
+  column.
 """
 
 from __future__ import annotations

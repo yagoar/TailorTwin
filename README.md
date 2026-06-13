@@ -37,25 +37,52 @@ After `pip install -e .` the `tailor-twin` console script is on PATH:
 | `tailor-twin scan CAPTURE --out-prefix data/results/NAME` | End-to-end pipeline |
 | `tailor-twin preflight CAPTURE` | Pre-scan capture sanity check |
 | `tailor-twin bent-arm FIT_NPZ` | Re-pose elbow + dump L01/L02/L04 |
+| `tailor-twin ring-deform FIT_NPZ --target G04=88 …` | Tape-exact girths on an existing fit |
+| `tailor-twin refine-tape FIT_NPZ …` | Betas-solve alternative to ring-deform |
 | `tailor-twin <cmd> --help` | Full flag list per command |
 
 Direct module invocation also works: `python -m tailor_twin.scan …`,
 `python -m tailor_twin.measure.cli …`.
 
+### Calibrated scan (recommended)
+
+The bare fit lands within a few cm on each girth. Pass a tape-measured
+height and any girths you care about to pin them exactly:
+
+```bash
+tailor-twin scan data/captures/NAME --out-prefix data/results/NAME \
+  --use-displacement --waist-color cyan \
+  --height 160 \
+  --tape-anchor G04=87.5 --tape-anchor G07=69 \
+  --tape-anchor G09=99 --tape-anchor M07=34
+```
+
+Anchorable codes: torso `G03` high-bust, `G04` bust, `G05` underbust,
+`G07` waist, `G08` high-hip, `G09` hip; legs `M03` thigh, `M05` knee,
+`M07` calf, `M09` ankle (each leg scaled independently). The GUI's
+**Calibration** card exposes the same fields. Segmentation defaults to
+`rvm` (person matting); `--pose-graph` adds drift-corrected fusion.
+
 ## Pipeline
 
 ```
 Stray capture       →  preprocess  →  TSDF fuse  →  cleanup
-   (rgb + depth        (segment +     (Open3D       (largest
-    + confidence        depth filter)  ScalableTSDF)  component,
-    + odometry)                                       smooth,
-                                                      decimate)
+   (rgb + depth        (RVM person    (Open3D       (floor crop,
+    + confidence        matting +      ScalableTSDF, largest comp,
+    + odometry)         depth filter)  intrinsics    smooth,
+                                       rescaled)     decimate)
    ↓
-SMPL-X+D fit       →  measure       →  bent-arm     →  exports
-  (300 betas +        (167 Seamly        re-pose       (CSV, OBJ,
-   per-vertex          catalog codes +   for L01/      SMIS,
-   displacement)        Aldrich/dpm)     L02/L04)      JSON)
+SMPL-X+D fit  →  clean-fit    →  tape anchors  →  measure   →  exports
+ (300 betas +   (symmetrise,    (--height +      (167 Seamly  (CSV, OBJ,
+  per-vertex     head/hand mask, ring-scale       catalog +    SMIS, JSON)
+  displacement)  A-pose)         girths exact)    bent-arm)
 ```
+
+The fit is parametric (~1-3 cm vs tape, repeatable). The optional
+`--height` and `--tape-anchor` pass then pin the scale and any tape-
+measured girths *exactly*, while the scan keeps the real cross-section
+shape — validated end-to-end against tape (height/bust/waist/hip/calf
+within ~0.1 cm after anchoring).
 
 All artefacts written next to the user-chosen `--out-prefix`:
 
@@ -80,11 +107,11 @@ src/tailor_twin/
   preflight.py      # capture pre-flight inspector
   io/               # Stray Scanner frame loader
   preprocess/       # depth filter, segmentation, waist-string detect
-  reconstruct/      # TSDF fuse + mesh cleanup
-  fit/              # SMPL-X+D mesh-to-mesh fitter
-  measure/          # landmarks, recipes, Seamly catalog, exports
+  reconstruct/      # TSDF fuse (intrinsics rescale) + mesh cleanup (floor crop)
+  fit/              # SMPL-X+D fitter, clean-fit, ring-deform tape anchors
+  measure/          # landmarks, Seamly catalog + extractor, exports
   gui/              # Flask app + Three.js viewer
-scripts/            # dev utilities (regenerate docs, direct exports)
+scripts/            # dev utilities (regenerate docs, SeamlyMe export, landmark editor)
 tests/              # unit + snapshot regression
 docs/               # measurement catalog, recipes glossary
 references/         # source PDFs/notes for Aldrich + dpm

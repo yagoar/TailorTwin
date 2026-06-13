@@ -33,6 +33,16 @@ After calibration against tape measurements:
 | Multi-point armhole and bust depths (dpm) | ±1 to 2 cm |
 | Small circumferences (wrist, ankle) | ±0.5 to 1 cm absolute |
 
+**Status (validated).** The bare SMPL-X+D fit lands ~1-3 cm vs tape and
+repeats to ~1 cm across independent clean captures. The `--height` +
+`--tape-anchor` calibration pass then pins the scale and any tape-measured
+girths **exactly** (verified height/bust/waist/hip/calf within ~0.1 cm),
+while preserving the scan's real cross-section shape. So the targets above
+are met *with* a handful of tape anchors — the realistic, validated
+operating mode — not from the bare scan alone. This matches the literature
+floor: parametric fits sit ~2-3 cm on real bodies, and tape anchoring is
+the documented way to reach drafting tolerance.
+
 ## 4. Hardware Prerequisites
 
 - iPhone 12 Pro / Pro Max or newer Pro, OR iPad Pro 2020+ (must have LiDAR)
@@ -78,19 +88,29 @@ iPhone Pro (LiDAR)              Mac
 +------------------+            +-----------------------------+
 | Stray Scanner    |  AirDrop   | Python pipeline             |
 | (capture app)    | ---------> |                             |
-|                  |            |  segment -> TSDF fuse       |
+|                  |            |  RVM matte -> TSDF fuse     |
+|                  |            |   (intrinsics rescaled,     |
+|                  |            |    floor cropped)           |
 |                  |            |  -> SMPL-X+D fit            |
-|                  |            |  -> constructional lines    |
+|                  |            |  -> clean-fit (symmetrise,  |
+|                  |            |     head/hand, A-pose)      |
+|                  |            |  -> tape-anchor calibration |
 |                  |            |  -> measurement extraction  |
-|                  |            |  -> SQLite + OBJ + worksheet|
+|                  |            |  -> CSV + OBJ + SMIS        |
 +------------------+            +-----------------------------+
                                           |
                                           v
-                            Blender / MeshLab / HTML viewer
+                            HTML viewer (GUI) / Blender / MeshLab
                             Optional: SVG block generator
 ```
 
 Local only. No cloud. Replace Stray Scanner with a custom iOS app in optional Phase 10.
+
+Capture intrinsics note: Stray reports `fx/fy/cx/cy` in the RGB resolution
+(e.g. 1920×1440) while depth is 256×192 — `scan.py` auto-detects the RGB
+size from `rgb.mp4` and rescales, else the projection is off by the ~7.5×
+ratio and the fuse shatters. Segmentation defaults to RVM person matting;
+`depth_threshold` keeps the floor/walls and is debug-only.
 
 ## 8. Repository Layout
 

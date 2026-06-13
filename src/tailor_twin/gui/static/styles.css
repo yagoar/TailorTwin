@@ -453,6 +453,7 @@ body.scan-page > .wrap {
   gap: 18px;
 }
 .scan-grid > .card { margin-bottom: 0; }
+.scan-grid > .card.span-2 { grid-column: 1 / -1; }
 
 .scan-actions {
   display: flex; align-items: center; gap: 10px;

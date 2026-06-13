@@ -80,20 +80,7 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2>Waist band</h2>
-      <div class="grid">
-        <label class="field-label" for="color">Colour</label>
-        <div>
-          <div id="swatches" class="swatch-row" aria-hidden="true"></div>
-          <input id="color" name="color" type="hidden" value="none">
-          <div class="help">Optional. Elastic in this colour overrides
-            the SMPL-X anatomical waist Y.</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
+    <div class="card span-2">
       <h2>Calibration</h2>
       <div class="grid">
         <label class="field-label" for="height">Height (cm)</label>
@@ -102,6 +89,15 @@
                  placeholder="e.g. 170">
           <div class="help">Optional but recommended. Anchors the mesh
             scale, removing odometry drift.</div>
+        </div>
+      </div>
+      <div class="grid">
+        <label class="field-label" for="color">Waist band</label>
+        <div>
+          <div id="swatches" class="swatch-row" aria-hidden="true"></div>
+          <input id="color" name="color" type="hidden" value="none">
+          <div class="help">Optional. Elastic in this colour overrides
+            the SMPL-X anatomical waist Y.</div>
         </div>
       </div>
       <div class="grid">

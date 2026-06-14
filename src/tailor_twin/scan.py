@@ -71,11 +71,19 @@ def _iter_fusion_inputs(
     segmenter = Segmenter(backend=seg_backend)
     needs_rgb = seg_backend != "depth_threshold"
 
+    skipped_no_rgb = 0
     for i, frame in enumerate(
             load_capture(capture, decode_rgb=needs_rgb)):
         if i % frame_stride != 0:
             continue
         if frame.depth_mm is None:
+            continue
+        if needs_rgb and frame.rgb is None:
+            # rgb.mp4 can decode fewer frames than odometry has rows (the
+            # video stream ends a little early); those trailing frames have
+            # no RGB, which the matting backends require. Skip them — they're
+            # a handful at the tail, the fuse already has full coverage.
+            skipped_no_rgb += 1
             continue
         filt = filter_depth(
             frame.depth_mm,
@@ -97,6 +105,9 @@ def _iter_fusion_inputs(
             intrinsics=frame.intrinsics,
             pose_c2w=frame.pose_cam_to_world,
         )
+    if skipped_no_rgb:
+        print(f"  ({skipped_no_rgb} trailing frame(s) skipped — no RGB "
+              "decoded from rgb.mp4)")
 
 
 def run(

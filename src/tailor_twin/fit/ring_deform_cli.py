@@ -234,12 +234,16 @@ def main(argv: list[str] | None = None) -> int:
                 scales[0], deform_mask)
 
     # ---- Per-leg girth deform (M03 thigh / M05 knee / M07 calf / M09
-    # ankle). Each leg is scaled about its OWN centroid via the single-
-    # region deform_ring, so the two separate limbs are not pushed
-    # together as a shared-centroid torso ring would do. The body is
-    # symmetrised, so the same target applies to both legs.
+    # ankle). Each leg is scaled about its OWN centroid (single-region
+    # radial scale) so the two separate limbs aren't pushed together as a
+    # shared-centroid torso ring would do. The scale per pass is driven by
+    # the real seamly EXTRACTOR value (same source of truth as the torso
+    # loop), not deform_ring's internal slice measure — the two disagree at
+    # the knee/ankle where the cross-section is complex, which left those
+    # codes short. The body is symmetrised, so the same scale applies to
+    # both legs.
     if leg_targets:
-        from .ring_deform import RingTarget as _RT, deform_ring
+        from .ring_deform import apply_radial_scale
         leg_masks = {
             side: region_vertex_mask((side,), model_folder=args.model_folder,
                                      gender=gender)
@@ -251,20 +255,24 @@ def main(argv: list[str] | None = None) -> int:
                 lm = build_landmark_set(
                     deformed.astype(np.float32), joints=joints, faces=faces,
                     gender=gender)
-                y = float(lm[lm_name][1])
-                max_resid = 0.0
-                for side in ("left_leg", "right_leg"):
-                    tgt = _RT(code=code, y_level=y, target_cm=target_cm,
-                              band_m=args.band_m)
-                    deformed, before, after = deform_ring(
-                        deformed, tgt, region_mask=leg_masks[side])
-                    if np.isfinite(after):
-                        max_resid = max(max_resid, abs(after - target_cm))
-                    print(f"  leg {code} {side}: {before:.2f} → {after:.2f} cm "
-                          f"(target {target_cm})")
-                if max_resid <= 0.3:
+                cat = extract_catalog(
+                    deformed.astype(np.float32), faces, joints=joints,
+                    gender=gender, landmarks=lm)
+                current = cat.values.get(code)
+                if current is None or not (current > 0):
+                    print(f"  leg {code}: extractor gave no value, skip")
+                    break
+                resid = abs(current - target_cm)
+                print(f"  pass {p+1} {code}: {current:.2f} cm "
+                      f"(target {target_cm}, resid {resid:.2f})")
+                if resid <= 0.3:
                     print(f"leg {code} converged pass {p+1}")
                     break
+                scale = target_cm / current
+                y = float(lm[lm_name][1])
+                for side in ("left_leg", "right_leg"):
+                    deformed = apply_radial_scale(
+                        deformed, y, args.band_m, scale, leg_masks[side])
 
     # Save a fit npz mirroring the source with deformed vertices.
     # Pose fields are overwritten with the canonical A-pose used above

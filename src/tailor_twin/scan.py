@@ -509,6 +509,12 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"--tape-anchor expects CODE=cm, got {spec!r}")
         code, val = spec.split("=", 1)
         anchor_dict[code.strip()] = float(val)
+    # --height also pins the FINAL body: the pre-fit scan rescale gets the
+    # fit close, but the parametric fit drifts a cm or two, so add A01 to the
+    # ring-deform targets to Y-scale the output mesh to the exact stature.
+    # An explicit --tape-anchor A01 wins.
+    if args.height is not None:
+        anchor_dict.setdefault("A01", float(args.height))
 
     return run(
         capture=args.capture,

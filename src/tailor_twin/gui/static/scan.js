@@ -61,29 +61,37 @@
   // --- Run / cancel + SSE log stream -------------------------------------
   let evtSource = null;
 
-  function setRunning(running, label) {
-    const btn = $("run-btn");
-    btn.classList.toggle("loading", running);
-    btn.disabled = running;
-    btn.querySelector(".btn-label").textContent =
-      label || (running ? "Running…" : "Run scan");
+  // Toggle the action buttons. ``activeId`` is the button driving the
+  // current job (gets the spinner + a status label); the others are just
+  // disabled. Pass running=false to reset everything to idle.
+  function setBusy(running, activeId, label) {
+    $("run-btn").disabled = running;
+    $("preflight-btn").disabled = running;
     $("cancel-btn").disabled = !running;
+    $("run-btn").classList.toggle("loading", running && activeId === "run-btn");
+    if (running && activeId) {
+      $(activeId).querySelector(".btn-label").textContent = label;
+    } else {
+      $("run-btn").querySelector(".btn-label").textContent = "Run scan";
+      $("preflight-btn").querySelector(".btn-label").textContent =
+        "Check capture";
+    }
   }
 
-  $("form").addEventListener("submit", async (e) => {
-    e.preventDefault();
+  // Start a backend job (scan or preflight) and stream its log via SSE.
+  async function startJob(url, activeId, runLabel) {
     $("log").textContent = "";
     setLogVisible(true);
-    setRunning(true, "Starting…");
+    setBusy(true, activeId, "Starting…");
     const data = new FormData($("form"));
-    const r = await fetch("/run", { method: "POST", body: data });
+    const r = await fetch(url, { method: "POST", body: data });
     const j = await r.json();
     if (!j.ok) {
       $("log").textContent = "ERROR: " + j.error + "\n";
-      setRunning(false);
+      setBusy(false);
       return;
     }
-    setRunning(true, "Running…");
+    setBusy(true, activeId, runLabel);
     evtSource = new EventSource("/stream");
     evtSource.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
@@ -94,14 +102,23 @@
       if (m.done) {
         evtSource.close();
         evtSource = null;
-        setRunning(false);
+        setBusy(false);
       }
     };
+  }
+
+  $("form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    startJob("/run", "run-btn", "Running…");
   });
+
+  $("preflight-btn").addEventListener("click", () =>
+    startJob("/preflight", "preflight-btn", "Checking…"),
+  );
 
   $("cancel-btn").addEventListener("click", async () => {
     await fetch("/cancel", { method: "POST" });
-    setRunning(true, "Cancelling…");
+    setBusy(true, null, "Cancelling…");
   });
 
   // --- Terminal toggle ---------------------------------------------------

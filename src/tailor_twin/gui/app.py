@@ -25,7 +25,12 @@ from .config import (
     TAPE_GIRTHS,
     WAIST_COLORS,
 )
-from .forms import build_cmd, validate
+from .forms import (
+    build_cmd,
+    build_preflight_cmd,
+    validate,
+    validate_capture_only,
+)
 from .runner import Runner
 from .viewer_data import list_scans, scan_payload
 
@@ -57,6 +62,18 @@ def create_app(runner: Runner | None = None) -> Flask:
         cmd = build_cmd(form)
         try:
             app.config["RUNNER"].start(cmd)
+        except RuntimeError as e:
+            return jsonify(ok=False, error=str(e))
+        return jsonify(ok=True)
+
+    @app.post("/preflight")
+    def preflight() -> Any:
+        form = request.form.to_dict(flat=True)
+        err = validate_capture_only(form)
+        if err:
+            return jsonify(ok=False, error=err)
+        try:
+            app.config["RUNNER"].start(build_preflight_cmd(form))
         except RuntimeError as e:
             return jsonify(ok=False, error=str(e))
         return jsonify(ok=True)

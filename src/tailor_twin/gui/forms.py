@@ -101,6 +101,27 @@ def validate(form: Mapping[str, str]) -> str | None:
     return None
 
 
+def validate_capture_only(form: Mapping[str, str]) -> str | None:
+    """Lightweight check for the preflight action: just a real capture dir.
+
+    Preflight only reads the capture, so it doesn't need the person /
+    output / export fields that :func:`validate` requires for a full run.
+    """
+    capture = (form.get("capture") or "").strip()
+    if not capture:
+        return "Pick a Stray capture folder."
+    if not Path(capture).is_dir():
+        return f"Capture folder does not exist: {capture}"
+    return None
+
+
+def build_preflight_cmd(form: Mapping[str, str]) -> list[str]:
+    """``python -m tailor_twin.preflight <capture>`` argv for the GUI's
+    Check-capture button. Streams the same depth/drift verdict as the CLI."""
+    capture = (form.get("capture") or "").strip()
+    return [PIPELINE_PY, "-m", "tailor_twin.preflight", capture]
+
+
 def build_cmd(form: Mapping[str, str]) -> list[str]:
     """Translate the validated form into the run_scan.py argv list.
 

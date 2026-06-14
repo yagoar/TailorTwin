@@ -9,9 +9,11 @@ import pytest
 from tailor_twin.gui.config import PIPELINE_PY, RUN_SCAN_ARGS
 from tailor_twin.gui.forms import (
     build_cmd,
+    build_preflight_cmd,
     slugify,
     split_person_name,
     validate,
+    validate_capture_only,
 )
 from tailor_twin.gui.runner import Runner
 
@@ -216,6 +218,28 @@ def test_validate_bad_height(tmp_path: Path) -> None:
 def test_validate_bad_girth(tmp_path: Path) -> None:
     err = validate(_good(tmp_path, calf="abc"))
     assert err and "calf" in err.lower()
+
+
+# ---------------------------------------------------------------------------
+# preflight (Check capture)
+# ---------------------------------------------------------------------------
+
+
+def test_validate_capture_only_ok(tmp_path: Path) -> None:
+    # preflight needs only a real capture dir, not person/output/exports.
+    assert validate_capture_only({"capture": str(tmp_path)}) is None
+
+
+def test_validate_capture_only_missing(tmp_path: Path) -> None:
+    assert validate_capture_only({"capture": ""})
+    err = validate_capture_only({"capture": str(tmp_path / "nope")})
+    assert err and "does not exist" in err
+
+
+def test_build_preflight_cmd(tmp_path: Path) -> None:
+    cmd = build_preflight_cmd({"capture": str(tmp_path)})
+    assert cmd[0] == PIPELINE_PY
+    assert cmd[1:] == ["-m", "tailor_twin.preflight", str(tmp_path)]
 
 
 # ---------------------------------------------------------------------------

@@ -110,26 +110,35 @@ def main(argv: list[str] | None = None) -> int:
             f"min={np.min(depth_medians_mm):.0f} mm "
             f"max={np.max(depth_medians_mm):.0f} mm")
     print(f"pose track length: {track_len:.2f} m")
-    print(f"start→end drift:   {drift:.3f} m "
-          f"({'OK loop closure' if drift < 0.20 else 'WARN — large drift'})")
+    gap_pct = (drift / track_len * 100.0) if track_len > 1e-6 else 0.0
+    print(f"start↔end gap:     {drift:.3f} m "
+          f"({gap_pct:.0f}% of track length)")
     if sample_indices:
         print("sample frames:     " + ", ".join(
             f"/tmp/{args.capture.name}_inspect_{i:04d}.png"
             for i in sample_indices))
 
-    # Health verdict.
+    # Health verdict. Only conditions that genuinely predict a bad fuse
+    # fail the check. The start↔end gap is NOT one: it's large whenever the
+    # orbit doesn't return to its start (a normal open sweep — a small
+    # fraction of the track length), and is a true drift signal only when
+    # the path was meant to close. Real odometry drift shows up as a
+    # doubled/ghosted mesh, so it's a post-fuse visual check, not a
+    # pre-fuse alarm — surfaced as a note below, never a failure.
     alarms = []
     if conf_total.get(2, 0) / total_conf < 0.20:
         alarms.append("< 20 % conf-2 depth — LiDAR noisy, recapture")
     if valid_pixel_ratios and np.mean(valid_pixel_ratios) < 0.05:
         alarms.append("< 5 % valid pixels — subject out of window")
-    if drift > 0.50:
-        alarms.append(f"large pose drift ({drift:.2f} m) — slow walk needed")
     if alarms:
         print("\nALARMS:")
         for a in alarms:
             print(f"  ! {a}")
         return 2
+    if drift > 0.50:
+        print(f"\nnote: start↔end gap is {drift:.2f} m — normal for an open "
+              "orbit that doesn't return to its start. Only a problem if the "
+              "fused mesh comes out doubled/ghosted; check it in the viewer.")
     print("\nverdict: OK to proceed to TSDF fusion")
     return 0
 

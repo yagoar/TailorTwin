@@ -36,11 +36,11 @@
     "status": "corrected"
   },
   "acromion_left": {
-    "vertex_id": 3875,
-    "status": "corrected"
+    "vertex_id": 5627,
+    "status": "corrected_shoulder_len_12cm"
   },
   "acromion_right": {
-    "vertex_id": 6626,
+    "vertex_id": 8321,
     "status": "mirrored_from_acromion_left"
   },
   "front_shoulder_centre_left": {

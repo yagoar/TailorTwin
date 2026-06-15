@@ -10,6 +10,7 @@ from tailor_twin.gui.config import PIPELINE_PY, RUN_SCAN_ARGS
 from tailor_twin.gui.forms import (
     build_cmd,
     build_preflight_cmd,
+    nest_out_prefix,
     slugify,
     split_person_name,
     validate,
@@ -158,6 +159,29 @@ def test_build_cmd_minimal(tmp_path: Path) -> None:
 def test_build_cmd_passes_gender(tmp_path: Path) -> None:
     cmd = build_cmd(_good(tmp_path, gender="female"))
     assert cmd[cmd.index("--gender") + 1] == "female"
+
+
+def test_nest_out_prefix_folds_into_folder(tmp_path: Path) -> None:
+    p = str(tmp_path / "yaiza_20260615")
+    assert nest_out_prefix(p) == str(Path(p) / "yaiza_20260615")
+
+
+def test_nest_out_prefix_idempotent(tmp_path: Path) -> None:
+    once = nest_out_prefix(str(tmp_path / "run"))
+    assert nest_out_prefix(once) == once  # a re-run must not nest twice
+
+
+def test_nest_out_prefix_blank() -> None:
+    assert nest_out_prefix("") == ""
+    assert nest_out_prefix("   ") == ""
+
+
+def test_build_cmd_nests_out_prefix(tmp_path: Path) -> None:
+    # The GUI field holds <results>/<stem>; build_cmd folds the run into a
+    # <stem>/ folder so every artifact lands together.
+    cmd = build_cmd(_good(tmp_path))
+    op = cmd[cmd.index("--out-prefix") + 1]
+    assert op == str(tmp_path / "yaiza_20260517" / "yaiza_20260517")
 
 
 def test_build_cmd_full(tmp_path: Path) -> None:

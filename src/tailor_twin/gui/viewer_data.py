@@ -102,19 +102,41 @@ def _horizontal_ruler(anchor_a, anchor_b, body_v, offset: float = 0.10):
     return bar, leaders
 
 
+def scan_dir(results_dir: Path, name: str) -> Path:
+    """Directory holding ``<name>_smplx_fit.npz``.
+
+    GUI runs live in a per-run subfolder (``results_dir/<stem>/<stem>_*``);
+    older or CLI runs may sit flat in ``results_dir``. Check flat first,
+    then one level down. Fall back to ``results_dir`` when nothing matches
+    so callers surface the missing-file error with that path.
+    """
+    if (results_dir / f"{name}_smplx_fit.npz").is_file():
+        return results_dir
+    for npz in results_dir.glob(f"*/{name}_smplx_fit.npz"):
+        return npz.parent
+    return results_dir
+
+
 def list_scans(results_dir: Path) -> list[dict[str, str]]:
     """Discover scan prefixes under ``results_dir``.
 
-    A "scan" is any ``<prefix>_smplx_fit.npz`` file. The matching
-    fitted OBJ is reported alongside so the front-end can disable
-    entries without an OBJ.
+    A "scan" is any ``<prefix>_smplx_fit.npz`` file, found either flat in
+    ``results_dir`` (legacy / CLI runs) or one level down in a per-run
+    subfolder (GUI runs). The matching fitted OBJ is reported alongside
+    so the front-end can disable entries without an OBJ.
     """
     out: list[dict[str, str]] = []
     if not results_dir.is_dir():
         return out
-    for npz in sorted(results_dir.glob("*_smplx_fit.npz")):
+    globs = (list(results_dir.glob("*_smplx_fit.npz"))
+             + list(results_dir.glob("*/*_smplx_fit.npz")))
+    seen: set[str] = set()
+    for npz in sorted(globs, key=lambda p: p.name):
         name = npz.name.removesuffix("_smplx_fit.npz")
-        obj = results_dir / f"{name}_fit_body.obj"
+        if name in seen:
+            continue
+        seen.add(name)
+        obj = npz.parent / f"{name}_fit_body.obj"
         out.append({
             "name": name,
             "has_obj": obj.is_file(),
@@ -138,12 +160,13 @@ def scan_payload(results_dir: Path, name: str) -> dict[str, Any]:
     if key in _CACHE:
         return _CACHE[key]
 
-    npz = results_dir / f"{name}_smplx_fit.npz"
-    obj = results_dir / f"{name}_fit_body.obj"
+    d = scan_dir(results_dir, name)
+    npz = d / f"{name}_smplx_fit.npz"
+    obj = d / f"{name}_fit_body.obj"
     if not npz.is_file():
         raise FileNotFoundError(f"fit npz not found: {npz}")
 
-    cache_path = results_dir / f"{name}_viewer_payload.json"
+    cache_path = d / f"{name}_viewer_payload.json"
     # Invalidate disk cache if the fit npz OR any measure-module file
     # is newer than the cached payload. Code-mtime check catches
     # behavioural changes (e.g. hip_level landmark rewrite) that would

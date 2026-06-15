@@ -7,7 +7,7 @@ import pytest
 
 from tailor_twin.gui.app import create_app
 from tailor_twin.gui.runner import Runner
-from tailor_twin.gui.viewer_data import list_scans
+from tailor_twin.gui.viewer_data import list_scans, scan_dir
 
 
 @pytest.fixture()
@@ -49,6 +49,31 @@ def test_list_scans_marks_obj(tmp_path: Path) -> None:
     assert by_name["alpha"]["obj_url"] == "/api/scan/alpha/obj"
     assert by_name["beta"]["has_obj"] is False
     assert by_name["beta"]["obj_url"] == ""
+
+
+def test_list_scans_finds_nested_runs(tmp_path: Path) -> None:
+    # GUI run: artifacts grouped in a per-run subfolder.
+    sub = tmp_path / "yaiza_20260615"
+    sub.mkdir()
+    (sub / "yaiza_20260615_smplx_fit.npz").write_bytes(b"")
+    (sub / "yaiza_20260615_fit_body.obj").write_text("v 0 0 0\n")
+    (sub / "yaiza_20260615_tape_smplx_fit.npz").write_bytes(b"")
+    # Legacy flat run still discoverable alongside.
+    (tmp_path / "old_smplx_fit.npz").write_bytes(b"")
+    out = {s["name"]: s for s in list_scans(tmp_path)}
+    assert out["yaiza_20260615"]["has_obj"] is True
+    assert "yaiza_20260615_tape" in out  # nested tape variant found
+    assert "old" in out  # flat legacy run found
+
+
+def test_scan_dir_resolves_nested_and_flat(tmp_path: Path) -> None:
+    sub = tmp_path / "run1"
+    sub.mkdir()
+    (sub / "run1_tape_smplx_fit.npz").write_bytes(b"")
+    (tmp_path / "flat_smplx_fit.npz").write_bytes(b"")
+    assert scan_dir(tmp_path, "run1_tape") == sub
+    assert scan_dir(tmp_path, "flat") == tmp_path
+    assert scan_dir(tmp_path, "missing") == tmp_path  # fallback to root
 
 
 def test_index_has_viewer_link(client) -> None:

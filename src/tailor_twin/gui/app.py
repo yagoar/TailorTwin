@@ -32,7 +32,7 @@ from .forms import (
     validate_capture_only,
 )
 from .runner import Runner
-from .viewer_data import list_scans, scan_payload
+from .viewer_data import list_scans, scan_dir, scan_payload
 
 
 def create_app(runner: Runner | None = None) -> Flask:
@@ -147,7 +147,7 @@ def create_app(runner: Runner | None = None) -> Flask:
     @app.get("/api/scan/<name>/obj")
     def api_scan_obj(name: str) -> Any:
         d = _resolve_dir()
-        obj = (d / f"{name}_fit_body.obj").resolve()
+        obj = (scan_dir(d, name) / f"{name}_fit_body.obj").resolve()
         if not obj.is_file() or d.resolve() not in obj.parents:
             abort(404)
         return send_file(obj, mimetype="text/plain")
@@ -155,7 +155,7 @@ def create_app(runner: Runner | None = None) -> Flask:
     @app.get("/api/scan/<name>/bent-arm-obj")
     def api_scan_bent_arm_obj(name: str) -> Any:
         d = _resolve_dir()
-        obj = (d / f"{name}_bent_arm_body.obj").resolve()
+        obj = (scan_dir(d, name) / f"{name}_bent_arm_body.obj").resolve()
         if not obj.is_file() or d.resolve() not in obj.parents:
             abort(404)
         return send_file(obj, mimetype="text/plain")

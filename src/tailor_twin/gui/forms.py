@@ -42,6 +42,25 @@ def slugify(name: str) -> str:
     return s or "scan"
 
 
+def nest_out_prefix(out_prefix: str) -> str:
+    """Fold a run's artifacts into a per-run folder.
+
+    The GUI field holds ``<results>/<stem>``; one run writes many files
+    (``<stem>_smplx_fit.npz``, ``<stem>_tape_*`` …). Returning
+    ``<results>/<stem>/<stem>`` drops them all into a ``<stem>/`` folder
+    while keeping the prefixed, self-describing filenames. Idempotent: a
+    prefix already shaped ``<dir>/<x>/<x>`` is returned unchanged so a
+    re-run does not nest twice.
+    """
+    s = (out_prefix or "").strip()
+    if not s:
+        return s
+    p = Path(s)
+    if p.parent.name == p.name:  # already <dir>/<stem>/<stem>
+        return s
+    return str(p / p.name)
+
+
 def split_person_name(person: str) -> tuple[str, str]:
     """Split a free-text name on whitespace: first token → given name,
     remainder → family name."""
@@ -130,7 +149,7 @@ def build_cmd(form: Mapping[str, str]) -> list[str]:
     assert exact argv content.
     """
     capture = (form.get("capture") or "").strip()
-    out_prefix = (form.get("out_prefix") or "").strip()
+    out_prefix = nest_out_prefix(form.get("out_prefix") or "")
     given, family = split_person_name(form.get("person") or "")
     csv_flag = "--export-csv" if form.get("csv") else "--no-export-csv"
     obj_flag = "--export-obj" if form.get("obj") else "--no-export-obj"

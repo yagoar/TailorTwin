@@ -499,39 +499,38 @@ class SurfacePlumb:
     y_band: float = 0.006
 
     def _path(self, verts, faces, landmarks: LandmarkSet) -> np.ndarray | None:
-        """Slice the body with a vertical plane at X = start.X and take
-        the requested side (front Z>0 or back Z<0) arc between Y(start)
-        and Y(target). Pure planar slice — no per-Y nearest-vertex
-        zigzag."""
+        """Walk the body surface straight down (constant X) from `start` to
+        the target Y. At each Y step take the surface vertex in a thin X
+        column at the start's X — the back-most (min Z) for side='back', the
+        front-most (max Z) for side='front'. One vertex per step → a clean
+        monotonic arc that hugs the surface, with no slice-cloud zigzag and
+        no sensitivity to where the body sits in Z (the front/back split is
+        relative to the body's median Z, not absolute 0)."""
         s = landmarks[self.start]
+        sx = float(s[0])
         end_y = float(landmarks[self.target_y_landmark][1])
-        origin = np.array([float(s[0]), 0.0, 0.0])
-        normal = np.array([1.0, 0.0, 0.0])
-        segs = slice_mesh(verts, faces, origin, normal, vertex_mask=None)
-        if not segs:
+        y_top = max(float(s[1]), end_y)
+        y_bot = min(float(s[1]), end_y)
+        z_mid = float(np.median(verts[:, 2]))
+        step = max(self.y_band, 1e-3)
+
+        pts: list[np.ndarray] = []
+        y = y_top
+        while y >= y_bot - 1e-9:
+            col = verts[(np.abs(verts[:, 0] - sx) < self.x_band)
+                        & (np.abs(verts[:, 1] - y) < step)]
+            if self.side == "back":
+                col = col[col[:, 2] < z_mid]
+                pick = col[np.argmin(col[:, 2])] if len(col) else None
+            else:
+                col = col[col[:, 2] > z_mid]
+                pick = col[np.argmax(col[:, 2])] if len(col) else None
+            if pick is not None:
+                pts.append(pick)
+            y -= step
+        if len(pts) < 2:
             return None
-        # Use the raw segment cloud rather than `_build_loops(segs)`: at
-        # near-midline X the loop builder often picks up only tiny
-        # artefact loops (face, fingers) while the actual torso slice
-        # doesn't close due to float precision. Raw segments always
-        # cover the full slice.
-        best = np.vstack(segs)
-        if self.side == "back":
-            side_pts = best[best[:, 2] < 0]
-        else:
-            side_pts = best[best[:, 2] > 0]
-        if len(side_pts) < 3:
-            return None
-        y_lo = min(float(s[1]), end_y)
-        y_hi = max(float(s[1]), end_y)
-        band = side_pts[(side_pts[:, 1] >= y_lo - 0.005)
-                        & (side_pts[:, 1] <= y_hi + 0.005)]
-        if len(band) < 3:
-            return None
-        # Order by Y descending so the path starts near `start`.
-        order = np.argsort(-band[:, 1])
-        ordered = band[order]
-        return np.vstack([s[None], ordered])
+        return np.vstack([s[None], np.asarray(pts)])
 
     def compute(self, verts, faces, landmarks: LandmarkSet) -> float:
         path = self._path(verts, faces, landmarks)

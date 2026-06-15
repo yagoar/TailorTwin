@@ -72,6 +72,14 @@ COMPOUND_LANDMARKS: dict[str, tuple[str, list[str]]] = {
     "bust_apex_left": ("lerp_vids_surf", ["5646", "3230", "0.5"]),
     "bust_apex_right": ("lerp_vids_surf", ["8340", "5993", "0.5"]),
     "bust_apex_midpoint": ("midpoint", ["bust_apex_left", "bust_apex_right"]),
+    # armpit_apex: the TOP of the armpit hollow (deepest point a tape
+    # reaches when pushed up into the armpit), ~3 cm above underarm_left.
+    # Distinct from underarm_left, which sits at the highbust/armscye ring
+    # level (G03) — that one must stay put (G03 girth is tape-validated).
+    # Used by H03 (armpit→waist side) and A04 (armpit height), which are
+    # measured from the hollow, not the ring.
+    "armpit_apex_left": ("alias_vid", ["4032"]),
+    "armpit_apex_right": ("alias_vid", ["6779"]),
     # Back midline at exact underarm Y — vid 5947 gives X/Z, underarm_left
     # gives Y. Used by G03 highbust so the back arc stays parallel to the
     # floor at true underarm height.

@@ -161,7 +161,10 @@ RECIPES = {
     # ------------------------------------------------------------------
     "A01": Height("top_of_head"),
     "A02": Height("c7"),
-    "A04": Height("underarm_left"),
+    # A04 armpit height: to the armpit HOLLOW apex (where a tape pushed up
+    # into the armpit lands), ~3 cm above the highbust/armscye ring that
+    # underarm_left marks (G03 girth level).
+    "A04": Height("armpit_apex_left"),
     "A05": Height("waist_side_left"),
     "A06": Height("hip_level"),
     "A08": Height("mid_knee_level"),
@@ -255,7 +258,9 @@ RECIPES = {
     # H02 …_flat_f: tape laid between the breasts — surface geodesic via
     # lowbust_apex (in the cleavage gutter).
     "H02": Geodesic(("front_neck_point", "lowbust_apex", "waist_cf")),
-    "H03": Geodesic(("underarm_left", "waist_side_left")),
+    # H03 armpit_to_waist_side: from the armpit HOLLOW apex (where the tape
+    # is pushed up into the armpit), not the lower highbust/armscye ring.
+    "H03": Geodesic(("armpit_apex_left", "waist_side_left")),
     "H04": Geodesic(("acromion_left", "waist_side_left")),
     # H05 neck_side_to_waist_f: surface plumb from SN down to the bust
     # line (G04), then a STRAIGHT chord (yardstick-style, like J04)

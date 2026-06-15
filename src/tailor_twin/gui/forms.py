@@ -158,6 +158,11 @@ def build_cmd(form: Mapping[str, str]) -> list[str]:
         if val is not None:
             cmd.extend(["--tape-anchor", f"{code}={val:g}"])
 
+    # Landmark vertex-id fixes: "name=vid" tokens, space/comma separated.
+    for tok in (form.get("landmark_fix") or "").replace(",", " ").split():
+        if "=" in tok:
+            cmd.extend(["--landmark-vid", tok])
+
     # Drift-corrected fusion (opt-in checkbox).
     if form.get("pose_graph"):
         cmd.append("--pose-graph")

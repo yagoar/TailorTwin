@@ -599,6 +599,7 @@ def build_landmark_set(
     faces: np.ndarray | None = None,
     waist_y_override: float | None = None,
     y_overrides: dict[str, float] | None = None,
+    vid_overrides: dict[str, int] | None = None,
     gender: str = "female",
 ) -> LandmarkSet:
     """Construct a LandmarkSet from a fitted SMPL-X mesh + verified IDs.
@@ -614,10 +615,20 @@ def build_landmark_set(
     `gender` selects between female-tuned vertex anchors (`bust_level` =
     `bust_apex_midpoint`) and anatomical searches for non-female bodies
     where those vids land off-target (`bust_level` = max front-Z slice
-    on the chest, mirroring the high_hip search)."""
+    on the chest, mirroring the high_hip search).
+
+    `vid_overrides` ({leaf_name: vertex_id}) replaces the verified vertex ID
+    of any base landmark — for hand-correcting a mis-placed landmark
+    (e.g. acromion_left) without editing the review JSON. Overrides win
+    over the JSON; downstream compound/dynamic landmarks that reference the
+    overridden leaf follow automatically."""
+    vertex_ids = load_vertex_ids(review_json)
+    if vid_overrides:
+        vertex_ids = {**vertex_ids, **{k: int(v)
+                                       for k, v in vid_overrides.items()}}
     return LandmarkSet(
         verts=fitted_verts,
-        vertex_ids=load_vertex_ids(review_json),
+        vertex_ids=vertex_ids,
         joints=joints,
         faces=faces,
         waist_y_override=waist_y_override,

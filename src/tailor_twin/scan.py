@@ -129,6 +129,7 @@ def run(
     keyframe_stride: int,
     height_cm: float | None,
     tape_anchors: dict[str, float] | None,
+    landmark_vids: list[str] | None,
     clean_fit: bool,
     apose_deg: float,
     model_folder: str,
@@ -328,6 +329,8 @@ def run(
         cmd.extend(["--person-gender", gender])
     if waist_json is not None and waist_json.is_file():
         cmd.extend(["--waist-y-from", str(waist_json)])
+    for spec in (landmark_vids or []):
+        cmd.extend(["--landmark-vid", spec])
     r = subprocess.run(cmd)
     if r.returncode != 0:
         print(f"  measure.cli failed (exit {r.returncode})")
@@ -437,6 +440,11 @@ def main(argv: list[str] | None = None) -> int:
              "G07 waist, G08 highhip, G09 hip; legs M03 thigh, M05 knee, "
              "M07 calf, M09 ankle (each leg scaled independently).")
     p.add_argument(
+        "--landmark-vid", action="append", default=None, metavar="NAME=VID",
+        help="Override a base landmark's SMPL-X vertex id (forwarded to the "
+             "measure step), repeatable, e.g. --landmark-vid "
+             "acromion_left=4447. A *_left override auto-mirrors to *_right.")
+    p.add_argument(
         "--tape-anchor", action="append", default=None, metavar="CODE=CM",
         help="Inline tape girth target, repeatable, e.g. --tape-anchor "
              "G04=87.5 --tape-anchor M07=34. Merged with --tape-anchors; "
@@ -534,6 +542,7 @@ def main(argv: list[str] | None = None) -> int:
         keyframe_stride=args.keyframe_stride,
         height_cm=args.height,
         tape_anchors=anchor_dict or None,
+        landmark_vids=args.landmark_vid,
         clean_fit=args.clean_fit,
         apose_deg=args.apose_deg,
         model_folder=args.model_folder,

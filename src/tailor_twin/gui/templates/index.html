@@ -117,6 +117,16 @@
         </div>
       </div>
       <div class="grid">
+        <label class="field-label" for="landmark_fix">Landmark fixes</label>
+        <div>
+          <input id="landmark_fix" name="landmark_fix" type="text"
+                 placeholder="e.g. acromion_left=4447">
+          <div class="help">Optional, advanced. Override a landmark's SMPL-X
+            vertex id (space/comma separated). A <code>*_left</code> fix
+            auto-mirrors to <code>*_right</code>.</div>
+        </div>
+      </div>
+      <div class="grid">
         <label class="field-label">Fit options</label>
         <div>
           <div class="chips">

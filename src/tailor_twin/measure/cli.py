@@ -194,6 +194,13 @@ def main(argv: list[str] | None = None) -> int:
              "--waist-y but persists the detection metadata alongside.",
     )
     p.add_argument(
+        "--landmark-vid", action="append", default=None, metavar="NAME=VID",
+        help="Override a base landmark's SMPL-X vertex id, repeatable, e.g. "
+             "--landmark-vid acromion_left=4447. Corrects a mis-placed "
+             "landmark without editing references/smplx_landmark_review.json. "
+             "A *_left override auto-mirrors to *_right.",
+    )
+    p.add_argument(
         "--bent-elbow-flex-deg", type=float, default=DEFAULT_ELBOW_FLEX_DEG,
         help=f"Elbow flex angle for the bent-arm override "
              f"(default {DEFAULT_ELBOW_FLEX_DEG}°).",
@@ -260,10 +267,29 @@ def main(argv: list[str] | None = None) -> int:
     )
     faces = np.asarray(bm.faces, dtype=np.int32)
 
+    # Landmark vertex-id overrides (hand-corrections). A *_left override
+    # auto-mirrors to *_right via the template's left/right vertex map.
+    vid_overrides: dict[str, int] | None = None
+    if args.landmark_vid:
+        from ..fit.clean_fit import build_symmetry_map
+        sym = build_symmetry_map(
+            bm.v_template.detach().cpu().numpy().astype(np.float64))
+        vid_overrides = {}
+        for spec in args.landmark_vid:
+            if "=" not in spec:
+                raise SystemExit(
+                    f"--landmark-vid expects NAME=VID, got {spec!r}")
+            name, vid = spec.split("=", 1)
+            name, vid = name.strip(), int(vid)
+            vid_overrides[name] = vid
+            if name.endswith("_left"):
+                vid_overrides[name[:-len("_left")] + "_right"] = int(sym[vid])
+        print(f"landmark vid overrides: {vid_overrides}")
+
     landmarks_set = build_landmark_set(
         verts, joints=joints, faces=faces,
         waist_y_override=waist_y_override, y_overrides=y_overrides,
-        gender=gender,
+        vid_overrides=vid_overrides, gender=gender,
     )
     cat = extract_catalog(verts, faces, joints=joints,
                           waist_y_override=waist_y_override,
@@ -282,7 +308,8 @@ def main(argv: list[str] | None = None) -> int:
             bent_landmarks = build_landmark_set(
                 pose.verts, joints=pose.joints, faces=faces,
                 waist_y_override=waist_y_override,
-                y_overrides=y_overrides, gender=gender,
+                y_overrides=y_overrides, vid_overrides=vid_overrides,
+                gender=gender,
             )
             for code in BENT_ARM_CODES:
                 try:

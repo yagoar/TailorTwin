@@ -257,13 +257,15 @@ def run(
     save_fit(result, fit_npz)
     print(f"  wrote {fit_npz}  (chamfer={result.final_chamfer:.6f})")
 
-    # ---- 3a. Clean-fit: symmetrize displacement, drop head/hand scan
-    # noise, re-pose to the canonical A-pose. Measurement-safe (no drafting
-    # code reads face/finger geometry; the neck and wrist stay intact) and
-    # produces a pose-normalized, symmetric body for measure + export.
-    if clean_fit and use_displacement:
-        print(f"[3a] clean-fit (symmetrize + head/hand mask + A-pose "
-              f"{apose_deg:.0f}deg)")
+    # ---- 3a. Clean-fit: re-pose to the canonical A-pose and re-centre
+    # (transl=0, global_orient=0) so the measured body is normalized, and —
+    # when displacement is present — symmetrize it and drop head/hand scan
+    # noise. Runs even without --use-displacement: the centering + A-pose
+    # normalization matters regardless (a raw scan-pose fit sits off-centre,
+    # which several surface-path measurements assume away). Measurement-safe.
+    if clean_fit:
+        extras = ("symmetrize + head/hand mask + " if use_displacement else "")
+        print(f"[3a] clean-fit ({extras}A-pose {apose_deg:.0f}deg + recentre)")
         from tailor_twin.fit.clean_fit import clean_fit_npz
         clean_fit_npz(
             fit_npz, fit_npz, model_folder=model_folder, gender=gender,
@@ -422,10 +424,11 @@ def main(argv: list[str] | None = None) -> int:
              "to cover crown→feet.")
     p.add_argument(
         "--clean-fit", action=argparse.BooleanOptionalAction, default=True,
-        help="Post-fit cleanup: symmetrize the displacement field, zero it "
-             "on the head + hands (removes warped-face / noisy-finger scan "
-             "artifacts; measurement-safe), and re-pose to the canonical "
-             "A-pose. Needs --use-displacement. Default on.")
+        help="Post-fit cleanup: re-pose to the canonical A-pose and re-centre "
+             "the body so it's normalized for measurement, and — with "
+             "--use-displacement — also symmetrize the displacement and zero "
+             "it on the head + hands (removes warped-face / noisy-finger "
+             "artifacts; measurement-safe). Default on.")
     p.add_argument(
         "--apose-deg", type=float, default=30.0,
         help="Shoulder angle (degrees from vertical) for the canonical "

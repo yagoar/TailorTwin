@@ -508,9 +508,11 @@ class SurfacePlumb:
         Pinning X is the documented "constant X column" intent: it removes
         the lateral zigzag (and the length inflation) that came from
         appending each row's extreme *vertex* at its own wandering X, which
-        drifted ±x_band per step for an off-centre start (e.g. SN_L). A
-        light Gaussian smooth on Z cleans residual per-row pick noise. The
-        front/back split is relative to the body's median Z, so the path is
+        drifted ±x_band per step for an off-centre start (e.g. SN_L). The
+        column is then oriented to begin at the start landmark, and the
+        whole 3D polyline is Gaussian-smoothed (endpoints pinned) to round
+        the start corner and clean per-row Z pick noise. The front/back
+        split is relative to the body's median Z, so the path is
         insensitive to where the body sits in Z."""
         s = landmarks[self.start]
         sx = float(s[0])
@@ -538,11 +540,30 @@ class SurfacePlumb:
             y -= step
         if len(ys) < 2:
             return None
-        zarr = np.asarray(zs)
-        if len(zarr) >= 9:
-            zarr = gaussian_filter1d(zarr, sigma=2.0, mode="nearest")
-        col_pts = np.column_stack([np.full(len(ys), sx), ys, zarr])
-        return np.vstack([s[None], col_pts])
+        cols = np.column_stack([np.full(len(ys), sx), ys, np.asarray(zs)])
+        # `cols` always run top→bottom (descending Y). Orient so the walk
+        # begins AT the start landmark: if `start` sits at the bottom (an
+        # upward measurement, e.g. waist→lowbust), reverse to ascend from
+        # it. Otherwise prepending a bottom landmark to a top→bottom list
+        # folds the path into a V (down, then back up) that double-counts
+        # the span.
+        if abs(float(s[1]) - y_bot) < abs(float(s[1]) - y_top):
+            cols = cols[::-1]
+        path = np.vstack([s[None], cols])
+        # Gaussian-smooth the whole 3D polyline (endpoints pinned) to round
+        # the corner where the start landmark (which can sit a few cm off
+        # the surface column in Z, e.g. the side-neck point set back over
+        # the shoulder) meets the first surface sample, and to clean
+        # per-row Z pick noise. X is already constant so it is unaffected.
+        if len(path) >= 9:
+            sm = np.empty_like(path)
+            for j in range(3):
+                sm[:, j] = gaussian_filter1d(path[:, j], sigma=2.0,
+                                              mode="nearest")
+            sm[0] = path[0]
+            sm[-1] = path[-1]
+            path = sm
+        return path
 
     def compute(self, verts, faces, landmarks: LandmarkSet) -> float:
         path = self._path(verts, faces, landmarks)

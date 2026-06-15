@@ -65,8 +65,12 @@ COMPOUND_LANDMARKS: dict[str, tuple[str, list[str]]] = {
     # lerp t=0.5 takes the midpoint: Y=-0.048, X=+0.093. Override the
     # verified-vid lookup in smplx_landmark_review.json; the JSON keeps
     # 3230 / 5993 as audit-trail for the closer of the two real vids.
-    "bust_apex_left": ("lerp_vids", ["5646", "3230", "0.5"]),
-    "bust_apex_right": ("lerp_vids", ["8340", "5993", "0.5"]),
+    # lerp_vids_surf: lerp the two canonical apex vids (sets X/Y → J01
+    # width + bust-line height), then pin Z to the local breast surface
+    # so the marker sits on the skin rather than on the chord through the
+    # curved breast. Fixes the J-code lines converging off the surface.
+    "bust_apex_left": ("lerp_vids_surf", ["5646", "3230", "0.5"]),
+    "bust_apex_right": ("lerp_vids_surf", ["8340", "5993", "0.5"]),
     "bust_apex_midpoint": ("midpoint", ["bust_apex_left", "bust_apex_right"]),
     # Back midline at exact underarm Y — vid 5947 gives X/Z, underarm_left
     # gives Y. Used by G03 highbust so the back arc stays parallel to the
@@ -679,6 +683,27 @@ def _op_lerp_vids(lm: LandmarkSet, bases: list[str]) -> np.ndarray:
     return lm.verts[vid_a] * (1 - t) + lm.verts[vid_b] * t
 
 
+def _op_lerp_vids_surf(lm: LandmarkSet, bases: list[str]) -> np.ndarray:
+    """Lerp two vids, then lift the point onto the body surface.
+
+    Keeps the lerp's X/Y — which set apex-to-apex width (J01) and the
+    bust-line height (bust_level Y) — but replaces Z with the LOCAL front
+    surface depth at that X/Y (the Z of the nearest front-hemisphere
+    vertex in the X/Y plane). The raw lerp midpoint is a chord through
+    the curved breast, so it can sit slightly off the skin; pinning Z to
+    the local surface puts the marker — and every J-code line starting at
+    it — on the body. Using the LOCAL nearest column (not the window max)
+    avoids snapping Z to a more-projecting peak a couple cm away, which
+    would make the marker poke out in front of its own column."""
+    p = _op_lerp_vids(lm, bases).copy()
+    v = lm.verts
+    front = v[v[:, 2] > 0.0]  # front hemisphere only
+    if len(front):
+        d = np.hypot(front[:, 0] - p[0], front[:, 1] - p[1])
+        p[2] = float(front[int(np.argmin(d)), 2])
+    return p
+
+
 def _op_snap_y_to(lm: LandmarkSet, bases: list[str]) -> np.ndarray:
     """Take X/Z from a vid, override Y with another landmark's Y."""
     pos = lm.verts[int(bases[0])].copy()
@@ -750,6 +775,7 @@ COMPOUND_OPS: dict[str, Callable[[LandmarkSet, list[str]], np.ndarray]] = {
     "alias_vid": _op_alias_vid,
     "midpoint_of_vids": _op_midpoint_of_vids,
     "lerp_vids": _op_lerp_vids,
+    "lerp_vids_surf": _op_lerp_vids_surf,
     "snap_y_to": _op_snap_y_to,
     "snap_y_landmark": _op_snap_y_landmark,
     "lerp_y": _op_lerp_y,

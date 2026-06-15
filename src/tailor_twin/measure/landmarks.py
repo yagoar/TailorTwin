@@ -496,6 +496,10 @@ class LandmarkSet:
     gender: str = "female"  # affects landmarks like bust_level where the
     # female-tuned vertex IDs land at the wrong anatomical level on
     # male / neutral meshes; non-female falls back to anatomical searches.
+    override_leaves: frozenset[str] = frozenset()  # leaves whose vertex_id
+    # came from an explicit --landmark-vid hand-pick. These win over
+    # COMPOUND/DYNAMIC heuristics for the SAME leaf (e.g. pinning
+    # bust_apex_left to a chosen surface vertex instead of the lerp).
 
     def __getitem__(self, name: str) -> np.ndarray:
         """Resolve `landmarks.<leaf>`, `joint.<NAME>`, or bare `<leaf>` to
@@ -519,6 +523,12 @@ class LandmarkSet:
     def _resolve(self, leaf: str) -> np.ndarray:
         """Internal resolver — same dispatch chain as `__getitem__` minus
         the waist-Y post-override (which is applied by the caller)."""
+        # An explicit hand-picked vertex (--landmark-vid) wins over every
+        # heuristic for that leaf — joint fallback, dynamic search, or
+        # compound synthesis — so a corrected apex/acromion is honoured
+        # even when the leaf is normally computed (e.g. a lerp).
+        if leaf in self.override_leaves and leaf in self.vertex_ids:
+            return self.verts[self.vertex_ids[leaf]]
         if leaf in JOINT_OVERRIDES and self.joints is not None:
             return self._joint(JOINT_OVERRIDES[leaf])
 
@@ -621,14 +631,19 @@ def build_landmark_set(
     of any base landmark — for hand-correcting a mis-placed landmark
     (e.g. acromion_left) without editing the review JSON. Overrides win
     over the JSON; downstream compound/dynamic landmarks that reference the
-    overridden leaf follow automatically."""
+    overridden leaf follow automatically. An override on a leaf that is
+    ITSELF compound/dynamic (e.g. bust_apex_left, normally a lerp) also
+    wins — the hand-picked vertex replaces the synthesised position."""
     vertex_ids = load_vertex_ids(review_json)
+    override_leaves: frozenset[str] = frozenset()
     if vid_overrides:
         vertex_ids = {**vertex_ids, **{k: int(v)
                                        for k, v in vid_overrides.items()}}
+        override_leaves = frozenset(vid_overrides)
     return LandmarkSet(
         verts=fitted_verts,
         vertex_ids=vertex_ids,
+        override_leaves=override_leaves,
         joints=joints,
         faces=faces,
         waist_y_override=waist_y_override,

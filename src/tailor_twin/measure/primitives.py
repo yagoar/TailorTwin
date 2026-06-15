@@ -499,13 +499,19 @@ class SurfacePlumb:
     y_band: float = 0.006
 
     def _path(self, verts, faces, landmarks: LandmarkSet) -> np.ndarray | None:
-        """Walk the body surface straight down (constant X) from `start` to
-        the target Y. At each Y step take the surface vertex in a thin X
-        column at the start's X — the back-most (min Z) for side='back', the
-        front-most (max Z) for side='front'. One vertex per step → a clean
-        monotonic arc that hugs the surface, with no slice-cloud zigzag and
-        no sensitivity to where the body sits in Z (the front/back split is
-        relative to the body's median Z, not absolute 0)."""
+        """Walk the body surface straight down from `start` to the target Y,
+        with the column PINNED to the start landmark's X (sx).
+
+        At each Y step we read the surface depth — back-most (min Z) for
+        side='back', front-most (max Z) for side='front' — among vertices in
+        a thin X slab around sx, but emit the point at exactly (sx, y, z).
+        Pinning X is the documented "constant X column" intent: it removes
+        the lateral zigzag (and the length inflation) that came from
+        appending each row's extreme *vertex* at its own wandering X, which
+        drifted ±x_band per step for an off-centre start (e.g. SN_L). A
+        light Gaussian smooth on Z cleans residual per-row pick noise. The
+        front/back split is relative to the body's median Z, so the path is
+        insensitive to where the body sits in Z."""
         s = landmarks[self.start]
         sx = float(s[0])
         end_y = float(landmarks[self.target_y_landmark][1])
@@ -514,23 +520,29 @@ class SurfacePlumb:
         z_mid = float(np.median(verts[:, 2]))
         step = max(self.y_band, 1e-3)
 
-        pts: list[np.ndarray] = []
+        ys: list[float] = []
+        zs: list[float] = []
         y = y_top
         while y >= y_bot - 1e-9:
             col = verts[(np.abs(verts[:, 0] - sx) < self.x_band)
                         & (np.abs(verts[:, 1] - y) < step)]
             if self.side == "back":
                 col = col[col[:, 2] < z_mid]
-                pick = col[np.argmin(col[:, 2])] if len(col) else None
+                z = float(col[:, 2].min()) if len(col) else None
             else:
                 col = col[col[:, 2] > z_mid]
-                pick = col[np.argmax(col[:, 2])] if len(col) else None
-            if pick is not None:
-                pts.append(pick)
+                z = float(col[:, 2].max()) if len(col) else None
+            if z is not None:
+                ys.append(y)
+                zs.append(z)
             y -= step
-        if len(pts) < 2:
+        if len(ys) < 2:
             return None
-        return np.vstack([s[None], np.asarray(pts)])
+        zarr = np.asarray(zs)
+        if len(zarr) >= 9:
+            zarr = gaussian_filter1d(zarr, sigma=2.0, mode="nearest")
+        col_pts = np.column_stack([np.full(len(ys), sx), ys, zarr])
+        return np.vstack([s[None], col_pts])
 
     def compute(self, verts, faces, landmarks: LandmarkSet) -> float:
         path = self._path(verts, faces, landmarks)

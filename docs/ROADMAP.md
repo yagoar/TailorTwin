@@ -44,6 +44,8 @@ user effort?*
 
 ### Definition of done for any accuracy-affecting change
 
+(`docs/TEST_RUN.md` is the step-by-step version of this list.)
+
 1. Light test suite green.
 2. `tests/test_yaiza_snapshot.py` green on the user's machine (or the
    diff explained and the snapshot deliberately regenerated).

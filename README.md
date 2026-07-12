@@ -146,6 +146,7 @@ references/         # source PDFs/notes for Aldrich + dpm
 - [`SPEC.md`](SPEC.md) — project spec (pipeline, accuracy targets, schema)
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — planned improvements, prioritized against the two project goals (simpler capture, CLO3D-ready avatar); written so any future session can pick up a workstream
 - [`docs/clo3d_avatar.md`](docs/clo3d_avatar.md) — CLO3D import procedure + measurement verification checklist for the exported avatar
+- [`docs/TEST_RUN.md`](docs/TEST_RUN.md) — end-to-end validation checklist for pipeline changes (env → numeric gate → synthetic seed → calibrated scan → fusion-free A/B → CLO3D)
 - [`GUARDRAILS.md`](GUARDRAILS.md) — AI-generation rules for this repo
 - [`docs/recipes.md`](docs/recipes.md) — measurement-recipe glossary
 - [`docs/catalog_coverage.md`](docs/catalog_coverage.md) — auto-generated table of every Seamly code + status

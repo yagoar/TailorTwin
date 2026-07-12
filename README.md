@@ -63,6 +63,14 @@ Anchorable codes: torso `G03` high-bust, `G04` bust, `G05` underbust,
 **Calibration** card exposes the same fields. Segmentation defaults to
 `rvm` (person matting); `--pose-graph` adds drift-corrected fusion.
 
+`--no-fusion` (EXPERIMENTAL, ROADMAP B1) skips TSDF fusion and fits
+SMPL-X directly to the multi-frame point cloud — subject sway becomes
+per-frame scatter averaged by the chamfer loss instead of fuzz baked
+into a fused surface. Writes `<prefix>_scan_cloud.obj`. Validate per
+`docs/ROADMAP.md` before trusting: overlay the cloud with a previous
+`_scan.obj`, then A/B the measurement CSVs of a `--fusion` vs
+`--no-fusion` run of the same capture.
+
 `--waist-height` (cm, floor → natural waist, measured vertically at the
 side) pins the *height* of the waist line for every waist-anchored
 measurement. It travels through the pipeline as a floor-relative value,

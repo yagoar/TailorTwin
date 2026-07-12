@@ -71,7 +71,7 @@ user effort?*
 | # | Workstream | Serves goal | Needs ML env | Model capability | Status |
 |---|-----------|-------------|--------------|------------------|--------|
 | A | Synthetic validation harness | both (safety net) | yes (user machine) | small OK, verify on user machine | todo |
-| B | Self-rotation capture (no helper) | 1 | yes + research | **capable model + human review** | todo |
+| B | Self-rotation capture (no helper) | 1 | yes + research | **capable model + human review** | B1 implemented, awaiting user A/B run |
 | C | CLO3D avatar quality | 2 | partly | small OK (docs/export), human verifies in CLO3D | todo |
 | D | Anthropometric sanity layer | 1 | partly | small OK (SMPL-X path); medium for external data | sources researched |
 | E | Uncertainty + block-critical tier | both | partly | small OK for tiering; medium for uncertainty | todo |
@@ -146,12 +146,24 @@ per-frame pose variation that averages out instead of baking into
 geometry.
 
 **Phased plan:**
-1. **B1 spike (existing captures, no new protocol):** fit shared betas
-   directly to K≈20 segmented depth frames from an existing capture
-   (reuse `fit/fit.py` losses; the frame loader and segmentation
-   already exist in `io/stray_loader.py` + `preprocess/`). Compare the
-   resulting catalog vs the TSDF-path catalog and vs tape. If within
-   ~1 cm, fusion is demonstrably optional.
+1. **B1 spike — IMPLEMENTED, awaiting validation** (user confirmed the
+   motivation: fused meshes come out fuzzy and fragile to small subject
+   movements). `tailor-twin scan CAPTURE --no-fusion …` back-projects
+   every kept frame's segmented depth to one world-frame point cloud
+   (`reconstruct/frames_cloud.py`, numpy-only, unit-tested; projection
+   mirrors `tsdf.py`'s Open3D conventions exactly) and fits SMPL-X to
+   it via the existing bidirectional point-to-point chamfer
+   (`fit_scan(scan_faces=None)`). Writes `<prefix>_scan_cloud.obj`
+   instead of `_scan.obj`; `--skip-fusion` reuses the cloud file.
+   **Validation protocol (user machine):**
+   - Overlay `_scan_cloud.obj` with a previous `_scan.obj` from the
+     SAME capture in MeshLab — surfaces must coincide (frame check).
+   - Run the same capture twice (`--fusion` / `--no-fusion`), same
+     person name: the history drift report prints per-code deltas;
+     compare both CSVs against tape truth.
+   - Visual heatmap / fit-body overlay per GUARDRAILS §12.4.
+   If the cloud path wins or ties, consider making it the default and
+   demoting TSDF to a debug path.
 2. **B2:** allow per-frame pose (subject rotates; static phone). Needs
    2D keypoints per frame for initialisation — a new dependency
    decision (e.g. a pose-estimation model); discuss with the user
@@ -161,12 +173,12 @@ geometry.
 **Guardrails:** GUARDRAILS §12.4 applies in full — ground in SMPLify-X
 conventions, validate visually, distance-heatmap check mandatory.
 
-**Small-model guidance: do NOT attempt unsupervised.** This is
-research-grade work with silent failure modes; it needs a capable
-model session plus the user running captures. A smaller session CAN
-prepare the ground: extract `fit_scan`'s loss assembly into functions
-reusable for multi-frame targets, behind tests that pin current
-behavior (requires Workstream A first).
+**Small-model guidance:** B1 is implemented — a smaller session may fix
+bugs the user reports from the validation runs (the pure-numpy module
+is fully unit-tested; extend `tests/test_frames_cloud.py` for any fix)
+but must not change the projection conventions without re-running the
+MeshLab overlay check. B2/B3 remain **capable-model + human-review**
+territory: research-grade, silent failure modes.
 
 ---
 

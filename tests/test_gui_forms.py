@@ -220,7 +220,35 @@ def test_build_cmd_height_and_girths(tmp_path: Path) -> None:
 def test_build_cmd_no_calibration_when_blank(tmp_path: Path) -> None:
     cmd = build_cmd(_good(tmp_path))
     assert "--height" not in cmd
+    assert "--waist-height" not in cmd
     assert "--tape-anchor" not in cmd
+
+
+def test_build_cmd_waist_height(tmp_path: Path) -> None:
+    cmd = build_cmd(_good(tmp_path, waist_height="100.5"))
+    assert ["--waist-height", "100.5"] == [
+        cmd[cmd.index("--waist-height")],
+        cmd[cmd.index("--waist-height") + 1],
+    ]
+
+
+def test_validate_waist_height_ok(tmp_path: Path) -> None:
+    assert validate(_good(tmp_path, waist_height="100")) is None
+    assert validate(_good(tmp_path, waist_height="")) is None
+
+
+def test_validate_bad_waist_height(tmp_path: Path) -> None:
+    for bad in ("abc", "-5", "0"):
+        err = validate(_good(tmp_path, waist_height=bad))
+        assert err and "waist height" in err.lower(), bad
+
+
+def test_validate_waist_height_exceeds_height(tmp_path: Path) -> None:
+    err = validate(_good(tmp_path, height="160", waist_height="170"))
+    assert err and "smaller than" in err
+    # equal is also rejected; and without a height it can't be checked.
+    assert validate(_good(tmp_path, height="160", waist_height="160"))
+    assert validate(_good(tmp_path, waist_height="170")) is None
 
 
 def test_build_cmd_pose_graph_and_clean_fit(tmp_path: Path) -> None:

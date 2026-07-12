@@ -109,10 +109,19 @@ def validate(form: Mapping[str, str]) -> str | None:
     if bday and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", bday):
         return f"Birthday must be yyyy-mm-dd: {bday!r}"
 
-    # Height + girths, when filled, must be positive numbers.
+    # Height + waist height + girths, when filled, must be positive numbers.
     if (form.get("height") or "").strip() and _parse_pos_float(
             form.get("height")) is None:
         return f"Height must be a positive number (cm): {form.get('height')!r}"
+    if (form.get("waist_height") or "").strip() and _parse_pos_float(
+            form.get("waist_height")) is None:
+        return ("Waist height must be a positive number (cm): "
+                f"{form.get('waist_height')!r}")
+    wh = _parse_pos_float(form.get("waist_height"))
+    h = _parse_pos_float(form.get("height"))
+    if wh is not None and h is not None and wh >= h:
+        return (f"Waist height ({wh:g} cm) must be smaller than "
+                f"height ({h:g} cm).")
     for field, _code, label in TAPE_GIRTHS:
         raw = (form.get(field) or "").strip()
         if raw and _parse_pos_float(raw) is None:
@@ -170,6 +179,11 @@ def build_cmd(form: Mapping[str, str]) -> list[str]:
     height = _parse_pos_float(form.get("height"))
     if height is not None:
         cmd.extend(["--height", f"{height:g}"])
+
+    # Waist height anchor (floor → natural waist, pins the waist line Y).
+    waist_height = _parse_pos_float(form.get("waist_height"))
+    if waist_height is not None:
+        cmd.extend(["--waist-height", f"{waist_height:g}"])
 
     # Tape girth anchors → one --tape-anchor CODE=cm per filled field.
     for field, code, _label in TAPE_GIRTHS:

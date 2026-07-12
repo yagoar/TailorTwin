@@ -602,6 +602,22 @@ class LandmarkSet:
         return self.joints[SMPLX_JOINT_INDEX[joint_name]]
 
 
+def waist_y_from_height(verts: np.ndarray, waist_height_cm: float) -> float:
+    """World-frame waist Y from a tape-measured waist height (floor → natural
+    waist, vertical, cm).
+
+    Frame-robust by construction: the floor is re-derived as the mesh's own
+    minimum Y, so the same tape number is valid on the raw scan-frame fit,
+    the clean-fit canonical body, and the ring-deformed mesh alike — unlike a
+    stored absolute Y, which goes stale the moment the body is re-centred.
+    """
+    if not waist_height_cm > 0:
+        raise ValueError(
+            f"waist height must be positive (cm), got {waist_height_cm!r}")
+    floor_y = float(np.asarray(verts)[:, 1].min())
+    return floor_y + waist_height_cm / 100.0
+
+
 def load_vertex_ids(path: Path | str = DEFAULT_REVIEW_JSON) -> dict[str, int]:
     """Read the verified vertex IDs (with any status — confirmed, corrected,
     mirrored). Skipped entries are dropped."""

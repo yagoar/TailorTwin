@@ -92,12 +92,23 @@
         </div>
       </div>
       <div class="grid">
+        <label class="field-label" for="waist_height">Waist height (cm)</label>
+        <div>
+          <input id="waist_height" name="waist_height" type="number"
+                 step="0.1" min="0" placeholder="e.g. 100">
+          <div class="help">Optional. Vertical tape distance floor →
+            natural waist (where the string sits). Pins the waist line
+            exactly; the most reliable waist anchor.</div>
+        </div>
+      </div>
+      <div class="grid">
         <label class="field-label" for="color">Waist band</label>
         <div>
           <div id="swatches" class="swatch-row" aria-hidden="true"></div>
           <input id="color" name="color" type="hidden" value="none">
           <div class="help">Optional. Elastic in this colour overrides
-            the SMPL-X anatomical waist Y.</div>
+            the SMPL-X anatomical waist Y. Ignored when a waist height
+            is entered above.</div>
         </div>
       </div>
       <div class="grid">

@@ -72,6 +72,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--passes", type=int, default=4)
     p.add_argument("--waist-y", type=float, default=None,
                    help="Override waist slice Y (m). Else from landmarks.")
+    p.add_argument("--waist-height-cm", type=float, default=None,
+                   help="Tape-measured waist height (floor → natural waist, "
+                        "vertical, cm). Frame-robust alternative to "
+                        "--waist-y: the G07 slice Y is re-derived as "
+                        "mesh min Y + height on the re-posed mesh each "
+                        "pass, so it survives the canonical re-centre and "
+                        "the A01 height scale. --waist-y wins if both set.")
     p.add_argument("--a-pose-shoulder-deg", type=float, default=30.0,
                    help="Re-pose the fit to canonical A-pose before "
                         "deforming (0 = T-pose). The chamfer-fit mesh "
@@ -157,11 +164,21 @@ def main(argv: list[str] | None = None) -> int:
         ("torso", "left_leg", "right_leg"),
         model_folder=args.model_folder, gender=gender)
 
+    def _waist_override_y(v: np.ndarray) -> float | None:
+        """G07 slice-Y override, re-derived against the mesh as it stands."""
+        if args.waist_y is not None:
+            return float(args.waist_y)
+        if args.waist_height_cm is not None:
+            from ..measure.landmarks import waist_y_from_height
+            return waist_y_from_height(v, args.waist_height_cm)
+        return None
+
     ring_targets: list[RingTarget] = []
     for code, target_cm in targets_cm.items():
         lm_name = _CODE_TO_LANDMARK[code]
-        if code == "G07" and args.waist_y is not None:
-            y = args.waist_y
+        wy = _waist_override_y(verts) if code == "G07" else None
+        if wy is not None:
+            y = wy
         else:
             y = float(landmarks[lm_name][1])
         ring_targets.append(RingTarget(
@@ -210,7 +227,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  pass {p+1} {t.code}: extractor gave no value, skip")
                 continue
             lm_name = _CODE_TO_LANDMARK[t.code]
-            if not (t.code == "G07" and args.waist_y is not None):
+            wy = _waist_override_y(deformed) if t.code == "G07" else None
+            if wy is not None:
+                t.y_level = wy
+            else:
                 t.y_level = float(lm[lm_name][1])
             scale = t.target_cm / current
             ys.append(t.y_level)

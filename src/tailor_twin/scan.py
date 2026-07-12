@@ -140,6 +140,7 @@ def run(
     waist_color: str | None,
     waist_hsv_low: tuple[int, int, int] | None,
     waist_hsv_high: tuple[int, int, int] | None,
+    waist_height_cm: float | None = None,
     export_csv: bool = True,
     export_obj: bool = True,
     export_smis: bool = True,
@@ -156,6 +157,12 @@ def run(
     json_path = out_prefix.with_name(out_prefix.name + "_seamly_catalog.json")
     smis_path = out_prefix.with_name(out_prefix.name + ".smis")
     waist_json = out_prefix.with_name(out_prefix.name + "_waist_y.json")
+
+    # Isotropic scale applied to the fused mesh by the --height rescale
+    # (1.0 when no rescale ran, or with --skip-fusion where the raw fuse
+    # extent is unknown). Needed to map the waist-string Y — detected in
+    # the RAW capture frame — onto the rescaled mesh.
+    rescale_factor = 1.0
 
     # ---- 1. Stray → segmented/filtered frames → TSDF mesh.
     if not skip_fusion:
@@ -208,7 +215,7 @@ def run(
         mesh = cleanup_mesh(mesh)
         if height_cm is not None:
             print(f"[2c] rescale to measured height ({height_cm:.1f} cm)")
-            mesh, _factor = rescale_to_stature(mesh, height_cm / 100.0)
+            mesh, rescale_factor = rescale_to_stature(mesh, height_cm / 100.0)
         save_mesh_obj(mesh, scan_obj)
         print(f"  wrote {scan_obj}")
     else:
@@ -217,8 +224,13 @@ def run(
             return 1
         print(f"[1-2/5] reuse {scan_obj}")
 
-    # ---- 2b. Waist-string colour detection (optional).
-    if waist_color is not None or (waist_hsv_low and waist_hsv_high):
+    # ---- 2b. Waist-string colour detection (optional). Skipped when the
+    # user supplied a tape-measured --waist-height — the explicit tape
+    # value is authoritative and frame-independent, so the HSV detection
+    # would only be overridden anyway.
+    det = None
+    if waist_height_cm is None and (
+            waist_color is not None or (waist_hsv_low and waist_hsv_high)):
         label = waist_color if waist_color is not None else "custom"
         print(f"[2b] waist-string detection (colour={label})")
         try:
@@ -234,9 +246,6 @@ def run(
         except Exception as e:  # noqa: BLE001
             print(f"  waist-string detection FAILED ({e}); "
                   "measurements will use SMPL-X anatomical waist Y")
-            waist_json = None
-    else:
-        waist_json = None
 
     # ---- 3. SMPL-X fit.
     print(f"[3/5] SMPL-X fit (num_betas={num_betas})")
@@ -245,6 +254,31 @@ def run(
     scan = trimesh.load(scan_obj, process=False)
     sv = np.asarray(scan.vertices, dtype=np.float32)
     sf = np.asarray(scan.faces, dtype=np.int32)
+
+    # ---- Waist anchoring: everything downstream (clean-fit, ring-deform)
+    # regenerates the body in the SMPL-X canonical frame (transl = 0), so
+    # the waist must travel as a FLOOR-RELATIVE height in cm, not an
+    # absolute Y — the detected string Y lives in the capture's ARKit
+    # world frame (origin at the phone's start pose) and goes stale the
+    # moment the body is re-centred. An explicit tape-measured
+    # --waist-height wins; else convert the detection. The --height
+    # rescale scales about the mesh's min corner, so the floor Y is shared
+    # between the raw detection frame and the saved mesh, and only the
+    # height ABOVE the floor picks up the rescale factor.
+    waist_h_cm: float | None = waist_height_cm
+    if waist_h_cm is None and det is not None:
+        floor_y = float(sv[:, 1].min())
+        waist_h_cm = (det.y_m - floor_y) * rescale_factor * 100.0
+        extent_cm = float(sv[:, 1].max() - sv[:, 1].min()) * 100.0
+        frac = waist_h_cm / extent_cm if extent_cm > 0 else 0.0
+        if 0.3 <= frac <= 0.75:
+            print(f"  waist string → {waist_h_cm:.1f} cm above floor "
+                  f"({frac:.0%} of stature)")
+        else:
+            print(f"  waist-string height {waist_h_cm:.1f} cm is {frac:.0%} "
+                  "of stature — implausible (bad detection or incomplete "
+                  "mesh), falling back to SMPL-X anatomical waist")
+            waist_h_cm = None
     cfg = FitConfig(
         model_folder=model_folder,
         gender=gender,
@@ -292,10 +326,8 @@ def run(
         ]
         for code, cm in anchors.items():
             cmd.extend(["--target", f"{code}={float(cm)}"])
-        if waist_json is not None and waist_json.is_file():
-            from tailor_twin.preprocess.waist_string import WaistStringDetection
-            cmd.extend(["--waist-y",
-                        str(WaistStringDetection.from_json(waist_json).y_m)])
+        if waist_h_cm is not None:
+            cmd.extend(["--waist-height-cm", f"{waist_h_cm:g}"])
         r = subprocess.run(cmd)
         if r.returncode != 0:
             print(f"  ring_deform_cli failed (exit {r.returncode})")
@@ -329,8 +361,8 @@ def run(
         cmd.extend(["--person-birth-date", person_birth_date])
     if gender:
         cmd.extend(["--person-gender", gender])
-    if waist_json is not None and waist_json.is_file():
-        cmd.extend(["--waist-y-from", str(waist_json)])
+    if waist_h_cm is not None:
+        cmd.extend(["--waist-height-cm", f"{waist_h_cm:g}"])
     for spec in (landmark_vids or []):
         cmd.extend(["--landmark-vid", spec])
     r = subprocess.run(cmd)
@@ -422,6 +454,14 @@ def main(argv: list[str] | None = None) -> int:
              "fused mesh so its floor→crown extent matches this number, "
              "anchoring out odometry global-scale drift. Requires the capture "
              "to cover crown→feet.")
+    p.add_argument(
+        "--waist-height", type=float, default=None,
+        help="Tape-measured waist height in CM: vertical distance from the "
+             "floor to the natural waist (where the string is tied). Pins "
+             "the waist line of every waist-anchored measurement to this "
+             "height above the mesh floor. More robust than the colour "
+             "detection (frame-independent, no HSV tuning) — takes "
+             "precedence over --waist-color when both are given.")
     p.add_argument(
         "--clean-fit", action=argparse.BooleanOptionalAction, default=True,
         help="Post-fit cleanup: re-pose to the canonical A-pose and re-centre "
@@ -556,6 +596,7 @@ def main(argv: list[str] | None = None) -> int:
         waist_color=args.waist_color,
         waist_hsv_low=waist_hsv_low,
         waist_hsv_high=waist_hsv_high,
+        waist_height_cm=args.waist_height,
         export_csv=args.export_csv,
         export_obj=args.export_obj,
         export_smis=args.export_smis,

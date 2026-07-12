@@ -194,6 +194,14 @@ def main(argv: list[str] | None = None) -> int:
              "--waist-y but persists the detection metadata alongside.",
     )
     p.add_argument(
+        "--waist-height-cm", type=float, default=None,
+        help="Tape-measured waist height (floor → natural waist, vertical, "
+             "cm). Resolved against THIS fit's mesh (waist Y = mesh min Y + "
+             "height), so it stays valid after clean-fit / ring-deform "
+             "re-centre the body — unlike an absolute --waist-y. "
+             "Precedence: --waist-y > --waist-height-cm > --waist-y-from.",
+    )
+    p.add_argument(
         "--landmark-vid", action="append", default=None, metavar="NAME=VID",
         help="Override a base landmark's SMPL-X vertex id, repeatable, e.g. "
              "--landmark-vid acromion_left=4447. Corrects a mis-placed "
@@ -219,14 +227,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
 
-    # Resolve waist-Y override (CLI value > JSON file > none).
-    waist_y_override: float | None = args.waist_y
-    if waist_y_override is None and args.waist_y_from is not None:
-        from ..preprocess.waist_string import WaistStringDetection
-        waist_y_override = WaistStringDetection.from_json(args.waist_y_from).y_m
-    if waist_y_override is not None:
-        print(f"waist-string Y override: {waist_y_override:.4f} m")
-
     # Photo-derived per-girth Y overrides (from manual landmark editor).
     y_overrides: dict[str, float] | None = None
     if args.landmarks is not None:
@@ -244,6 +244,22 @@ def main(argv: list[str] | None = None) -> int:
     verts = fit["smplx_vertices"].astype(np.float32)
     joints = (fit["smplx_joints"].astype(np.float32)
               if "smplx_joints" in fit.files else None)
+
+    # Resolve waist-Y override (--waist-y > --waist-height-cm > JSON file).
+    # --waist-height-cm is floor-relative and resolved against THIS mesh,
+    # so it needs the fit's vertices — hence resolution happens here, after
+    # the npz load.
+    waist_y_override: float | None = args.waist_y
+    if waist_y_override is None and args.waist_height_cm is not None:
+        from .landmarks import waist_y_from_height
+        waist_y_override = waist_y_from_height(verts, args.waist_height_cm)
+        print(f"waist height {args.waist_height_cm:.1f} cm above floor "
+              f"→ Y override {waist_y_override:.4f} m")
+    if waist_y_override is None and args.waist_y_from is not None:
+        from ..preprocess.waist_string import WaistStringDetection
+        waist_y_override = WaistStringDetection.from_json(args.waist_y_from).y_m
+    if waist_y_override is not None:
+        print(f"waist Y override: {waist_y_override:.4f} m")
     from ..fit.fit import fit_gender, fit_person_info
     gender = args.gender or fit_gender(fit)
 

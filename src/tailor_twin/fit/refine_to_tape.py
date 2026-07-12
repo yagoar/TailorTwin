@@ -88,8 +88,18 @@ def _eval_targets(
     gender: str,
     waist_y_override: float | None,
     joints: np.ndarray | None = None,
+    waist_height_cm: float | None = None,
 ) -> dict[str, float]:
-    """Run the full extractor and pluck out the requested codes."""
+    """Run the full extractor and pluck out the requested codes.
+
+    ``waist_height_cm`` (floor-relative tape value) is resolved against the
+    CURRENT verts on every call — the floor Y shifts as betas change leg
+    length, so a once-computed absolute Y would drift over the iterations.
+    An explicit ``waist_y_override`` wins when both are set.
+    """
+    if waist_y_override is None and waist_height_cm is not None:
+        from ..measure.landmarks import waist_y_from_height
+        waist_y_override = waist_y_from_height(verts, waist_height_cm)
     cat = extract_catalog(
         verts, faces, joints=joints,
         waist_y_override=waist_y_override, gender=gender,
@@ -134,6 +144,7 @@ def refine_betas_to_tape(
     anchor_weight: float = 0.05,      # pulls towards original betas
     ridge: float = 0.01,              # JᵀJ damping
     waist_y_override: float | None = None,
+    waist_height_cm: float | None = None,
     a_pose_shoulder_deg: float = 0.0,
     verbose: bool = True,
 ) -> RefineResult:
@@ -170,7 +181,8 @@ def refine_betas_to_tape(
     betas = betas0.copy()
     v0, j0 = _forward(bm, betas, body_pose, global_orient, transl, disp)
     values_before = _eval_targets(
-        v0, faces, target_codes, gender, waist_y_override, joints=j0)
+        v0, faces, target_codes, gender, waist_y_override, joints=j0,
+        waist_height_cm=waist_height_cm)
     if verbose:
         print(f"refine: gender={gender}, active betas={n_active}, "
               f"targets={dict(zip(target_codes, target_vec))}")
@@ -184,7 +196,8 @@ def refine_betas_to_tape(
         verts, jts = _forward(
             bm, betas, body_pose, global_orient, transl, disp)
         current = _eval_targets(
-            verts, faces, target_codes, gender, waist_y_override, joints=jts)
+            verts, faces, target_codes, gender, waist_y_override, joints=jts,
+            waist_height_cm=waist_height_cm)
         residual = target_vec - np.array(
             [current[c] for c in target_codes], dtype=np.float64)
         max_abs = float(np.max(np.abs(residual)))
@@ -206,7 +219,7 @@ def refine_betas_to_tape(
             try:
                 m_p = _eval_targets(
                     v_p, faces, target_codes, gender, waist_y_override,
-                    joints=j_p)
+                    joints=j_p, waist_height_cm=waist_height_cm)
             except KeyError as e:
                 if verbose:
                     print(f"    perturb beta[{j}] skipped: {e}")
@@ -244,7 +257,7 @@ def refine_betas_to_tape(
         bm, betas, body_pose, global_orient, transl, disp)
     final_vals = _eval_targets(
         final_verts, faces, target_codes, gender, waist_y_override,
-        joints=final_joints)
+        joints=final_joints, waist_height_cm=waist_height_cm)
 
     if verbose:
         if converged:

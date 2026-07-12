@@ -73,7 +73,7 @@ user effort?*
 | A | Synthetic validation harness | both (safety net) | yes (user machine) | small OK, verify on user machine | todo |
 | B | Self-rotation capture (no helper) | 1 | yes + research | **capable model + human review** | todo |
 | C | CLO3D avatar quality | 2 | partly | small OK (docs/export), human verifies in CLO3D | todo |
-| D | Anthropometric sanity layer | 1 | no | small OK **once sources provided** | blocked on sources |
+| D | Anthropometric sanity layer | 1 | partly | small OK (SMPL-X path); medium for external data | sources researched |
 | E | Uncertainty + block-critical tier | both | partly | small OK for tiering; medium for uncertainty | todo |
 | F | In-process pipeline refactor | maintainability | yes (verification) | medium; gate on A | todo |
 | G | Small fixes | — | no | small OK | todo |
@@ -207,29 +207,51 @@ pattern — safe.
 
 ---
 
-## Workstream D — Anthropometric sanity layer (blocked on sources)
+## Workstream D — Anthropometric sanity layer (sources researched)
 
 **Why (goal 1):** height + weight + one or two girths predict the rest
-of the body surprisingly well via published regressions. Used as a
-*sanity check*, this catches capture failures for free: "extracted
-thigh is 4 cm off the regression given hip and height — check the
-scan". Never used to *replace* measurements.
+of the body well. Used as a *sanity check*, this catches capture
+failures for free: "extracted thigh is 4 cm off what your hip + height
+imply — check the scan". Never used to *replace* measurements.
 
-**Blocker:** GUARDRAILS §12 forbids regression coefficients from model
-memory. The user must place a citable source (paper/table scan) in
-`references/anthropometry/` first. Candidate sources to look for:
-published allometric equations from large anthropometric surveys
-(e.g. ANSUR II / CAESAR-derived regression tables).
+**Sources** are researched and documented in
+`references/anthropometry/README.md`. Summary of the three options and
+the recommendation:
 
-**Once sources exist:** new `src/tailor_twin/sanity.py` with
-`check_plausibility(values, height_cm, weight_kg) -> list[warning]`,
-each coefficient commented with its source page; wire after the
-history step in `scan.py`; unit tests with the source's own worked
-examples. Add an optional "Weight (kg)" GUI field (mirrors the
-waist-height field pattern — it feeds only this check).
+- **Preferred — derive the prior from SMPL-X itself** (no download,
+  GUARDRAILS-clean). The female shape space is a PCA over the CAESAR
+  civilian scan survey, so sampling betas + running our extractor gives
+  girth/height/volume tuples for thousands of civilian bodies. Fit the
+  plausibility regressions on that committed table. This is an extension
+  of Workstream A — **do it there**, then D just consumes the
+  coefficients. Validates internal consistency (exactly what a
+  capture-failure detector needs), not population truth.
+- **ANSUR II** — the only *free* external dataset with bust/chest +
+  waist + hip on the same subjects; military-biased, so document it and
+  prefer it only when a real measured girth-to-girth relation is wanted.
+- **NHANES** — public-domain civilian marginals, but recent cycles lack
+  bust/hip girths; use only to sanity-check height/weight/waist
+  distributions.
 
-**Small-model guidance:** safe and well-scoped *after* the user
-provides the source; do not start before.
+**Blocker status:** the external files could not be downloaded from the
+sandbox (egress proxy denied the gov/academic hosts — see the sources
+README). The *preferred* SMPL-X path has **no** external dependency and
+is not blocked.
+
+**Implementation once coefficients exist:** new
+`src/tailor_twin/sanity.py` with
+`check_plausibility(values, height_cm, weight_kg=None) -> list[warning]`,
+each coefficient traced to its committed source (the regenerating script
+for the SMPL-X path, or a cited page for ANSUR/NHANES); wire after the
+history step in `scan.py` (best-effort, never fails a scan); unit tests
+with worked examples. Optional "Weight (kg)" GUI field mirrors the
+waist-height field pattern and feeds only this check.
+
+**Small-model guidance:** the SMPL-X-derived path is safe to implement
+alongside Workstream A (needs the model file + a harness run to produce
+the coefficient table — verify on the user's machine). The ANSUR/NHANES
+path stays gated on the user downloading a source into
+`references/anthropometry/` and recording its checksum there.
 
 ---
 

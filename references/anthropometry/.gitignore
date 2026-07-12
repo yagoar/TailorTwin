@@ -1,0 +1,8 @@
+# Downloaded anthropometric data — large / license-gated. Keep only the
+# provenance README in git; drop the actual CSVs and report PDFs here.
+*.csv
+*.CSV
+*.pdf
+*.zip
+*.xlsx
+!README.md

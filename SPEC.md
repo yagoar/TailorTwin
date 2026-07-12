@@ -6,6 +6,17 @@ This document is the authoritative project spec. The repository ships a Typer co
 
 ## 1. Goals
 
+**North star (in priority order):**
+
+1. **Simpler capture** — taking a scan must be easier than taping the
+   ~25 block measurements by hand. Tape inputs (height, waist height,
+   girth anchors) are optional accuracy aids, never requirements.
+2. **A CLO3D-ready avatar** — an accurate 3D body whose girths match
+   the real body, exported for virtual garment fitting.
+
+Feature test: does it reduce user effort, or improve accuracy per unit
+of user effort? See `docs/ROADMAP.md` for the prioritized plan.
+
 - Capture body geometry with iPhone/iPad LiDAR + Stray Scanner
 - Reconstruct a clean 3D mesh of the body
 - Fit SMPL-X+D (parametric body model with per-vertex displacements) to the scan

@@ -63,6 +63,14 @@ Anchorable codes: torso `G03` high-bust, `G04` bust, `G05` underbust,
 **Calibration** card exposes the same fields. Segmentation defaults to
 `rvm` (person matting); `--pose-graph` adds drift-corrected fusion.
 
+`--no-fusion` (EXPERIMENTAL, ROADMAP B1) skips TSDF fusion and fits
+SMPL-X directly to the multi-frame point cloud — subject sway becomes
+per-frame scatter averaged by the chamfer loss instead of fuzz baked
+into a fused surface. Writes `<prefix>_scan_cloud.obj`. Validate per
+`docs/ROADMAP.md` before trusting: overlay the cloud with a previous
+`_scan.obj`, then A/B the measurement CSVs of a `--fusion` vs
+`--no-fusion` run of the same capture.
+
 `--waist-height` (cm, floor → natural waist, measured vertically at the
 side) pins the *height* of the waist line for every waist-anchored
 measurement. It travels through the pipeline as a floor-relative value,
@@ -102,7 +110,17 @@ data/results/yaiza_20260517_aldrich.csv       # filtered named CSV
 data/results/yaiza_20260517_seamly_catalog.json
 data/results/yaiza_20260517.smis              # SeamlyMe XML
 data/results/yaiza_20260517_bent_arm.{json,npz}
+data/results/yaiza_20260517_manifest.json     # full run config + git commit
+data/results/yaiza_20260517_tape_audit.json   # if tape-anchored: pre/post drift
+data/results/history.sqlite                   # per-person measurement history
 ```
+
+Every run records its measurements into `history.sqlite` and prints any
+code that drifted ≥ 1 cm versus the same person's previous run — the
+repeatability check that catches a bad capture immediately. Tape-anchored
+runs also write a **tape audit** flagging any *unanchored* measurement the
+ring calibration moved by more than 1 cm (i.e. where anchoring pulled the
+mesh away from the scan).
 
 ## Package layout
 
@@ -126,6 +144,7 @@ references/         # source PDFs/notes for Aldrich + dpm
 ## Docs
 
 - [`SPEC.md`](SPEC.md) — project spec (pipeline, accuracy targets, schema)
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — planned improvements, prioritized against the two project goals (simpler capture, CLO3D-ready avatar); written so any future session can pick up a workstream
 - [`GUARDRAILS.md`](GUARDRAILS.md) — AI-generation rules for this repo
 - [`docs/recipes.md`](docs/recipes.md) — measurement-recipe glossary
 - [`docs/catalog_coverage.md`](docs/catalog_coverage.md) — auto-generated table of every Seamly code + status

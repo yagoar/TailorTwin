@@ -121,6 +121,7 @@ def run(
     alpha_threshold: float,
     intrinsics_native_size: tuple[int, int] | None,
     skip_fusion: bool,
+    use_fusion: bool,
     pose_graph: bool,
     keyframe_stride: int,
     height_cm: float | None,
@@ -149,26 +150,65 @@ def run(
     csv_path = out_prefix.with_name(out_prefix.name + "_measurements.csv")
     json_path = out_prefix.with_name(out_prefix.name + "_seamly_catalog.json")
     smis_path = out_prefix.with_name(out_prefix.name + ".smis")
+    scan_cloud_obj = out_prefix.with_name(out_prefix.name + "_scan_cloud.obj")
 
-    # ---- 1. Stray → segmented/filtered frames → TSDF mesh.
-    if not skip_fusion:
-        # Stray reports fx/fy/cx/cy in the RGB camera's native resolution
-        # (e.g. 1920x1440), but the depth map is 256x192. Open3D needs the
-        # intrinsics in the depth pixel grid, so the native size must be
-        # known to rescale. If the caller didn't pass it, read it straight
-        # from rgb.mp4 — this is always the resolution Stray's intrinsics
-        # are expressed in. Without this the projection is off by the
-        # res ratio (~7.5x) and the fuse shatters into fragments.
-        if intrinsics_native_size is None:
-            import cv2
-            _cap = cv2.VideoCapture(str(capture / "rgb.mp4"))
-            _w = int(_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            _h = int(_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            _cap.release()
-            if _w > 0 and _h > 0:
-                intrinsics_native_size = (_w, _h)
-                print(f"  intrinsics native size auto-detected from rgb.mp4: "
-                      f"{_w}x{_h} (depth is 256x192)")
+    # Stray reports fx/fy/cx/cy in the RGB camera's native resolution
+    # (e.g. 1920x1440), but the depth map is 256x192. Both build paths
+    # (TSDF fuse and the fusion-free cloud) need the intrinsics in the
+    # depth pixel grid, so the native size must be known to rescale. If
+    # the caller didn't pass it, read it straight from rgb.mp4 — this is
+    # always the resolution Stray's intrinsics are expressed in. Without
+    # this the projection is off by the res ratio (~7.5x) and the
+    # reconstruction shatters into fragments.
+    if not skip_fusion and intrinsics_native_size is None:
+        import cv2
+        _cap = cv2.VideoCapture(str(capture / "rgb.mp4"))
+        _w = int(_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        _h = int(_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        _cap.release()
+        if _w > 0 and _h > 0:
+            intrinsics_native_size = (_w, _h)
+            print(f"  intrinsics native size auto-detected from rgb.mp4: "
+                  f"{_w}x{_h} (depth is 256x192)")
+
+    # ---- 1. Stray → segmented/filtered frames → chamfer target.
+    # Default: TSDF fuse → mesh. EXPERIMENTAL --no-fusion: back-project
+    # the frames straight to a world-frame point cloud (ROADMAP B1) —
+    # subject sway becomes per-frame scatter averaged by the chamfer
+    # loss instead of fuzz baked into a fused surface.
+    if not use_fusion:
+        from tailor_twin.reconstruct.frames_cloud import (
+            build_frames_cloud,
+            rescale_points_to_stature,
+            save_cloud_obj,
+        )
+        if skip_fusion:
+            if not scan_cloud_obj.is_file():
+                print(f"ERROR: --skip-fusion but {scan_cloud_obj} not found")
+                return 1
+            print(f"[1-2/5] reuse {scan_cloud_obj}")
+        else:
+            print(f"[1/5] multi-frame cloud (EXPERIMENTAL fusion-free, "
+                  f"backend={seg_backend})")
+            inputs = _iter_fusion_inputs(
+                capture,
+                seg_backend=seg_backend,
+                frame_stride=frame_stride,
+                min_conf=min_conf,
+                min_depth_mm=min_depth_mm,
+                max_depth_mm=max_depth_mm,
+                bilateral=bilateral,
+                alpha_threshold=alpha_threshold,
+            )
+            pts = build_frames_cloud(
+                inputs, intrinsics_native_size=intrinsics_native_size)
+            if height_cm is not None:
+                print(f"[2c] rescale to measured height ({height_cm:.1f} cm)")
+                pts, _factor = rescale_points_to_stature(
+                    pts, height_cm / 100.0)
+            save_cloud_obj(pts, scan_cloud_obj)
+            print(f"  wrote {scan_cloud_obj}  ({len(pts)} pts)")
+    elif not skip_fusion:
         mode = "pose-graph" if pose_graph else "raw-odometry"
         print(f"[1/5] TSDF fusion (backend={seg_backend}, "
               f"voxel={voxel_m*1000:.1f}mm, {mode})")
@@ -212,11 +252,20 @@ def run(
 
     # ---- 3. SMPL-X fit.
     print(f"[3/5] SMPL-X fit (num_betas={num_betas})")
-    import trimesh
     from tailor_twin.fit.fit import FitConfig, fit_scan, save_fit
-    scan = trimesh.load(scan_obj, process=False)
-    sv = np.asarray(scan.vertices, dtype=np.float32)
-    sf = np.asarray(scan.faces, dtype=np.int32)
+    if use_fusion:
+        import trimesh
+        scan = trimesh.load(scan_obj, process=False)
+        sv = np.asarray(scan.vertices, dtype=np.float32)
+        sf = np.asarray(scan.faces, dtype=np.int32)
+    else:
+        # Point-cloud target: no faces → fit_scan falls back to the
+        # bidirectional point-to-point chamfer (see fit.py).
+        from tailor_twin.reconstruct.frames_cloud import load_cloud_obj
+        sv = load_cloud_obj(scan_cloud_obj)
+        sf = None
+        print(f"  chamfer target: multi-frame cloud "
+              f"({len(sv)} pts, point-to-point)")
 
     cfg = FitConfig(
         model_folder=model_folder,
@@ -309,6 +358,44 @@ def run(
         print(f"  measure.cli failed (exit {r.returncode})")
         return r.returncode
 
+    # ---- 4b. Measurement history: record the run and report drift vs the
+    # same person's previous run. Repeatability is the metric that matters
+    # for a personal tool — a code that jumped ≥ 1 cm between two scans of
+    # the same body flags a capture/anchor problem NOW rather than as a
+    # garment that doesn't fit. Best-effort: never fails the scan.
+    try:
+        from tailor_twin.history import (
+            drift_rows, history_db_for, previous_values, record_run,
+        )
+        values = {k: float(v)
+                  for k, v in json.loads(json_path.read_text()).items()}
+        person = f"{person_given_name} {person_family_name}".strip() or "unknown"
+        db = history_db_for(out_prefix)
+        prev = previous_values(db, person=person)
+        record_run(db, person=person, out_prefix=str(out_prefix),
+                   values=values,
+                   meta={"gender": gender, "num_betas": num_betas,
+                         "tape_anchors": tape_anchors or {},
+                         "waist_height_cm": waist_height_cm,
+                         "height_cm": height_cm})
+        if prev is None:
+            print(f"  history: first recorded run for {person!r} ({db})")
+        else:
+            moved = drift_rows(values, prev, tol_cm=1.0)
+            if moved:
+                print(f"  history: {len(moved)} code(s) moved ≥ 1.0 cm vs "
+                      f"{person!r}'s previous run:")
+                for code, p_cm, c_cm, d in moved[:10]:
+                    print(f"    {code}: {p_cm:.2f} → {c_cm:.2f} cm "
+                          f"({d:+.2f})")
+                if len(moved) > 10:
+                    print(f"    … and {len(moved) - 10} more")
+            else:
+                print("  history: consistent with previous run (< 1.0 cm "
+                      "drift on every shared code)")
+    except Exception as e:  # noqa: BLE001 — history must never break a scan
+        print(f"  history: skipped ({e})")
+
     # ---- 5. Bent-arm npz + json (for review viewer + audit).
     print("[5/5] bent-arm re-pose for L01/L02/L03/L04")
     cmd = [
@@ -323,7 +410,10 @@ def run(
         return r.returncode
 
     print("\nDONE.")
-    print(f"  scan mesh:     {scan_obj}")
+    if use_fusion:
+        print(f"  scan mesh:     {scan_obj}")
+    else:
+        print(f"  scan cloud:    {scan_cloud_obj}")
     print(f"  fit npz:       {fit_npz}")
     if export_obj:
         print(f"  fit body obj:  {fit_obj}")
@@ -373,7 +463,21 @@ def main(argv: list[str] | None = None) -> int:
                         "the depth resolution.")
     p.add_argument("--intrinsics-native-h", type=int, default=None)
     p.add_argument("--skip-fusion", action="store_true",
-                   help="Reuse an existing <prefix>_scan.obj.")
+                   help="Reuse an existing <prefix>_scan.obj (or, with "
+                        "--no-fusion, <prefix>_scan_cloud.obj).")
+    p.add_argument(
+        "--fusion", action=argparse.BooleanOptionalAction, default=True,
+        help="EXPERIMENTAL: --no-fusion skips TSDF fusion and fits SMPL-X "
+             "directly to the multi-frame point cloud (per-frame segmented "
+             "depth back-projected to world). Subject sway becomes "
+             "per-frame scatter averaged by the chamfer loss instead of "
+             "fuzz baked into a fused surface. Writes "
+             "<prefix>_scan_cloud.obj instead of _scan.obj. Validation on "
+             "first use (ROADMAP B1): overlay the cloud with a previous "
+             "_scan.obj of the same capture in MeshLab (frames must "
+             "coincide), then compare the measurement CSVs of a --fusion "
+             "vs --no-fusion run — the history drift report prints the "
+             "per-code deltas automatically.")
     p.add_argument(
         "--pose-graph", action="store_true",
         help="EXPERIMENTAL drift-corrected fusion: refine per-keyframe poses "
@@ -479,6 +583,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.height is not None:
         anchor_dict.setdefault("A01", float(args.height))
 
+    # Provenance: record the exact configuration + code version + outcome
+    # next to the artifacts, whether the run succeeds or dies mid-stage.
+    from tailor_twin.manifest import utc_now_iso, write_manifest
+    started = utc_now_iso()
+    rc = 1  # what the manifest reports if run() raises
+    try:
+        rc = _run_with_args(args, native_size, anchor_dict)
+    finally:
+        try:
+            mpath = write_manifest(args.out_prefix, config=vars(args),
+                                   rc=rc, started=started,
+                                   finished=utc_now_iso())
+            print(f"  manifest:      {mpath}")
+        except Exception as e:  # noqa: BLE001 — provenance is best-effort
+            print(f"  manifest: skipped ({e})")
+    return rc
+
+
+def _run_with_args(args, native_size, anchor_dict) -> int:
     return run(
         capture=args.capture,
         out_prefix=args.out_prefix,
@@ -493,6 +616,7 @@ def main(argv: list[str] | None = None) -> int:
         alpha_threshold=args.alpha_threshold,
         intrinsics_native_size=native_size,
         skip_fusion=args.skip_fusion,
+        use_fusion=args.fusion,
         pose_graph=args.pose_graph,
         keyframe_stride=args.keyframe_stride,
         height_cm=args.height,

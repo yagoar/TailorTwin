@@ -304,6 +304,62 @@ def deform_ring(
     return verts, current_cm, after_cm
 
 
+def audit_girth_drift(
+    before: dict[str, float],
+    after: dict[str, float],
+    anchored: set[str] | frozenset[str] | list[str] | tuple[str, ...],
+    tol_cm: float = 1.0,
+) -> dict:
+    """Compare full measurement catalogs before/after tape-anchor deformation.
+
+    The ring deform is *supposed* to move only the anchored girths (plus a
+    small feathered neighbourhood); this audit makes that verifiable per
+    run. It reports every code that changed, marks which were anchored,
+    and flags UNANCHORED codes whose |delta| exceeds ``tol_cm`` — those
+    are the ones where the deformation pulled the mesh away from the scan
+    by more than the tolerance, e.g. a neighbour ring inside the falloff
+    band or an implausible tape value dragging the profile.
+
+    Pure dict-in / dict-out so it is unit-testable without the extractor.
+    Codes present in only one catalog are ignored (extraction skips are
+    not drift). Non-finite values are ignored.
+
+    Returns::
+
+        {
+          "tol_cm": 1.0,
+          "drift": {code: {"before_cm", "after_cm", "delta_cm",
+                            "anchored"}},         # |delta| >= 0.05 only
+          "flagged_unanchored": [codes],           # |delta| > tol, sorted
+        }
+    """
+    anchored_set = set(anchored)
+    drift: dict[str, dict] = {}
+    flagged: list[tuple[float, str]] = []
+    for code in sorted(set(before) & set(after)):
+        b = float(before[code])
+        a = float(after[code])
+        if not (np.isfinite(b) and np.isfinite(a)):
+            continue
+        d = a - b
+        is_anchored = code in anchored_set
+        if abs(d) >= 0.05 or is_anchored:
+            drift[code] = {
+                "before_cm": round(b, 2),
+                "after_cm": round(a, 2),
+                "delta_cm": round(d, 2),
+                "anchored": is_anchored,
+            }
+        if not is_anchored and abs(d) > tol_cm:
+            flagged.append((abs(d), code))
+    flagged.sort(reverse=True)
+    return {
+        "tol_cm": tol_cm,
+        "drift": drift,
+        "flagged_unanchored": [code for _, code in flagged],
+    }
+
+
 def deform_rings(
     verts: np.ndarray,
     targets: list[RingTarget],

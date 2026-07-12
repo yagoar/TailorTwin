@@ -135,7 +135,7 @@ src/tailor_twin/
   fit/              # SMPL-X+D fitter, clean-fit, ring-deform tape anchors
   measure/          # landmarks, Seamly catalog + extractor, exports
   gui/              # Flask app + Three.js viewer
-scripts/            # dev utilities (regenerate docs, SeamlyMe export, landmark editor)
+scripts/            # dev utilities (regenerate docs, synthetic harness, landmark editor)
 tests/              # unit + snapshot regression
 docs/               # measurement catalog, recipes glossary
 references/         # source PDFs/notes for Aldrich + dpm

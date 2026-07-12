@@ -11,31 +11,11 @@ from tailor_twin.gui.forms import (
     build_cmd,
     build_preflight_cmd,
     nest_out_prefix,
-    slugify,
     split_person_name,
     validate,
     validate_capture_only,
 )
 from tailor_twin.gui.runner import Runner
-
-
-# ---------------------------------------------------------------------------
-# slugify
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("name, expected", [
-    ("Yaiza Gómez", "yaiza_g_mez"),
-    ("Hello World", "hello_world"),
-    ("  trim  me  ", "trim_me"),
-    ("---weird-/?chars!!!", "weird_chars"),
-    ("", "scan"),
-    ("   ", "scan"),
-    ("ALL CAPS", "all_caps"),
-    ("a1b2", "a1b2"),
-])
-def test_slugify(name: str, expected: str) -> None:
-    assert slugify(name) == expected
 
 
 # ---------------------------------------------------------------------------

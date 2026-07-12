@@ -9,15 +9,12 @@ by the same betas, so you cannot freely set highbust 4 cm below bust).
 The chamfer fit gets the body 95 % right; the last few centimetres on
 each girth need a *geometric* edit, not another beta solve.
 
-Ring deformation does exactly that. For each target circumference it:
-
-  1. Slices the mesh at the measurement's anatomical Y level.
-  2. Measures the current circumference (same convex-hull-perimeter
-     method as ``measure.primitives.PlanarGirth``).
-  3. Computes a radial scale = target / current.
-  4. Scales every mesh vertex in a Y-band around that level outward /
-     inward from the slice centroid, with a smooth cosine falloff so
-     neighbouring rings blend rather than step.
+Ring deformation does exactly that. ``ring_deform_cli`` drives it in an
+extractor-feedback loop: measure each target girth with the REAL Seamly
+extractor, compute a radial scale = target / current per ring, apply one
+continuous scale profile over the torso (``apply_scale_profile``; per-leg
+girths use ``apply_radial_scale``), repeat until every residual is
+< 0.3 cm.
 
 Because each ring is scaled independently, there is no shape-space
 coupling — every targeted girth lands on its target. Topology is
@@ -112,82 +109,6 @@ def apply_scale_profile(
     return verts
 
 
-def apply_anisotropic_profile(
-    verts: np.ndarray,
-    y_levels: np.ndarray,
-    x_scales: np.ndarray,
-    z_scales: np.ndarray,
-    region_mask: np.ndarray | None = None,
-    ramp_m: float = 0.10,
-) -> np.ndarray:
-    """Continuous *anisotropic* scale profile — X and Z scaled per Y by
-    independent factors. This is the silhouette-fit deformation.
-
-    ``apply_scale_profile`` scales X and Z by the *same* factor, so a
-    slice keeps its SMPL-X front/back-to-width aspect ratio and only its
-    girth changes. Here X (left-right body width) and Z (front-back
-    depth) get separate control curves: ``x_scales`` is driven by the
-    front photo's silhouette width, ``z_scales`` by the side photo's
-    depth. The slice's cross-section therefore takes the aspect ratio
-    *measured from the two photos*, not the parametric model's guess —
-    which is the whole point of a 3DLook-style silhouette fit.
-
-    Control points (``y_levels`` / ``x_scales`` / ``z_scales``) are
-    interpolated piecewise-linearly in Y; outside the range each scale
-    cosine-ramps back to 1.0 over ``ramp_m`` so the deformed torso
-    blends into undeformed neighbours. The radial origin per Y is the
-    region's XZ centroid, interpolated between control slices, so the
-    cross-section stays centred as it is reshaped.
-
-    A control point may be NaN in ``x_scales`` or ``z_scales`` — that
-    axis simply has no usable measurement at that Y (e.g. a front-view
-    torso width hidden by a fused arm). NaN points are dropped from that
-    axis's curve; the surrounding valid points interpolate across the
-    gap. The other axis is unaffected."""
-    verts = verts.copy()
-    order = np.argsort(y_levels)
-    ys = np.asarray(y_levels, dtype=np.float64)[order]
-    sx = np.asarray(x_scales, dtype=np.float64)[order]
-    sz = np.asarray(z_scales, dtype=np.float64)[order]
-
-    vy = verts[:, 1]
-
-    def _profile(ys_all: np.ndarray, ss_all: np.ndarray) -> np.ndarray:
-        keep = np.isfinite(ss_all)
-        if not np.any(keep):
-            return np.ones_like(vy)
-        ya, ss = ys_all[keep], ss_all[keep]
-        prof = np.interp(vy, ya, ss, left=ss[0], right=ss[-1])
-        below = vy < ya[0]
-        above = vy > ya[-1]
-        d_below = np.clip((ya[0] - vy[below]) / ramp_m, 0, 1)
-        prof[below] = 1.0 + (ss[0] - 1.0) * 0.5 * (1 + np.cos(np.pi * d_below))
-        d_above = np.clip((vy[above] - ya[-1]) / ramp_m, 0, 1)
-        prof[above] = 1.0 + (ss[-1] - 1.0) * 0.5 * (1 + np.cos(np.pi * d_above))
-        if region_mask is not None:
-            prof = np.where(region_mask, prof, 1.0)
-        return prof
-
-    prof_x = _profile(ys, sx)
-    prof_z = _profile(ys, sz)
-
-    # Per-Y XZ centroid of the region, interpolated between control
-    # slices, so the radial origin tracks the body centreline.
-    torso = verts[region_mask] if region_mask is not None else verts
-    cx = np.interp(vy, ys,
-                   [torso[np.abs(torso[:, 1] - y) < 0.03][:, 0].mean()
-                    if np.any(np.abs(torso[:, 1] - y) < 0.03) else 0.0
-                    for y in ys])
-    cz = np.interp(vy, ys,
-                   [torso[np.abs(torso[:, 1] - y) < 0.03][:, 2].mean()
-                    if np.any(np.abs(torso[:, 1] - y) < 0.03) else 0.0
-                    for y in ys])
-
-    verts[:, 0] = cx + (verts[:, 0] - cx) * prof_x
-    verts[:, 2] = cz + (verts[:, 2] - cz) * prof_z
-    return verts
-
-
 def apply_radial_scale(
     verts: np.ndarray,
     y_level: float,
@@ -220,36 +141,6 @@ def apply_radial_scale(
     return verts
 
 
-def _slice_perimeter_cm(
-    verts: np.ndarray,
-    y_level: float,
-    band: float = 0.012,
-    region_mask: np.ndarray | None = None,
-) -> tuple[float, np.ndarray]:
-    """Convex-hull perimeter (cm) of the vertices in a thin Y-band, plus
-    the band's XZ centroid. Mirrors PlanarGirth's hull-perimeter measure.
-
-    ``region_mask`` (bool, per-vertex) restricts the slice to a body
-    region — pass the SMPL-X torso mask so arms crossing the bust/waist/
-    hip Y-bands don't inflate the hull (PlanarGirth uses the same torso
-    restriction)."""
-    from scipy.spatial import ConvexHull
-
-    m = np.abs(verts[:, 1] - y_level) < band
-    if region_mask is not None:
-        m = m & region_mask
-    pts = verts[m][:, [0, 2]]
-    centroid = pts.mean(axis=0) if len(pts) else np.zeros(2)
-    if len(pts) < 8:
-        return float("nan"), centroid
-    try:
-        hull = ConvexHull(pts)
-    except Exception:  # noqa: BLE001 — degenerate slice
-        return float("nan"), centroid
-    # scipy ConvexHull.area is the perimeter for 2-D input.
-    return float(hull.area) * 100.0, centroid
-
-
 def _cosine_falloff(dist: np.ndarray, band: float) -> np.ndarray:
     """1.0 at dist=0, smoothly → 0.0 at dist=band, 0 beyond.
 
@@ -259,49 +150,6 @@ def _cosine_falloff(dist: np.ndarray, band: float) -> np.ndarray:
     inside = dist < band
     w[inside] = 0.5 * (1.0 + np.cos(np.pi * dist[inside] / band))
     return w
-
-
-def deform_ring(
-    verts: np.ndarray,
-    target: RingTarget,
-    *,
-    measure_band: float = 0.012,
-    region_mask: np.ndarray | None = None,
-) -> tuple[np.ndarray, float, float]:
-    """Apply one ring deformation. Returns (new_verts, before_cm, after_cm).
-
-    Vertices within ``target.band_m`` of ``target.y_level`` AND inside
-    ``region_mask`` (e.g. torso) are scaled radially (in XZ) about the
-    slice centroid by ``target_cm / current``, weighted by a cosine
-    falloff so the deformation tapers to zero at the band edge.
-
-    Restricting the deformed set to the torso mask keeps arm vertices
-    fixed — scaling them radially from the torso centroid would warp
-    the arms."""
-    verts = verts.copy()
-    current_cm, centroid = _slice_perimeter_cm(
-        verts, target.y_level, band=measure_band, region_mask=region_mask)
-    if not np.isfinite(current_cm) or current_cm <= 0:
-        return verts, current_cm, current_cm
-
-    scale = target.target_cm / current_cm
-
-    dy = np.abs(verts[:, 1] - target.y_level)
-    weight = _cosine_falloff(dy, target.band_m)  # (N,)
-    if region_mask is not None:
-        weight = weight * region_mask.astype(weight.dtype)
-
-    # Per-vertex radial scale: lerp 1.0 → scale by the falloff weight.
-    per_vertex_scale = 1.0 + weight * (scale - 1.0)
-
-    # Radial vector in XZ from the slice centroid.
-    radial = verts[:, [0, 2]] - centroid[None, :]
-    verts[:, 0] = centroid[0] + radial[:, 0] * per_vertex_scale
-    verts[:, 2] = centroid[1] + radial[:, 1] * per_vertex_scale
-
-    after_cm, _ = _slice_perimeter_cm(
-        verts, target.y_level, band=measure_band, region_mask=region_mask)
-    return verts, current_cm, after_cm
 
 
 def audit_girth_drift(
@@ -358,42 +206,3 @@ def audit_girth_drift(
         "drift": drift,
         "flagged_unanchored": [code for _, code in flagged],
     }
-
-
-def deform_rings(
-    verts: np.ndarray,
-    targets: list[RingTarget],
-    *,
-    passes: int = 3,
-    tol_cm: float = 0.3,
-    region_mask: np.ndarray | None = None,
-    verbose: bool = True,
-) -> np.ndarray:
-    """Apply all ring targets, iterating ``passes`` times so the cosine
-    falloffs of neighbouring rings re-converge.
-
-    Targets are processed top-to-bottom (descending Y) each pass —
-    deterministic order so overlapping bands compose the same way.
-
-    ``region_mask`` restricts both measurement and deformation to a
-    body region (pass the SMPL-X torso mask)."""
-    verts = verts.copy()
-    ordered = sorted(targets, key=lambda t: -t.y_level)
-
-    for p in range(passes):
-        max_resid = 0.0
-        for t in ordered:
-            verts, before, after = deform_ring(
-                verts, t, region_mask=region_mask)
-            if np.isfinite(after):
-                max_resid = max(max_resid, abs(after - t.target_cm))
-            if verbose:
-                print(f"  pass {p+1} {t.code}: "
-                      f"{before:.2f} → {after:.2f} cm "
-                      f"(target {t.target_cm:.2f})")
-        if max_resid <= tol_cm:
-            if verbose:
-                print(f"ring deform converged pass {p+1} "
-                      f"(max residual {max_resid:.2f} cm)")
-            break
-    return verts

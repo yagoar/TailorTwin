@@ -31,16 +31,6 @@ def _parse_pos_float(raw: str | None) -> float | None:
     return v if v > 0 else None
 
 
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
-
-
-def slugify(name: str) -> str:
-    """Lowercase, ASCII, underscore-separated stem. Empty → 'scan'."""
-    s = (name or "").strip().lower()
-    s = _SLUG_RE.sub("_", s).strip("_")
-    return s or "scan"
-
-
 def nest_out_prefix(out_prefix: str) -> str:
     """Fold a run's artifacts into a per-run folder.
 

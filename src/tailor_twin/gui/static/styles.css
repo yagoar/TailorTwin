@@ -214,31 +214,6 @@ select {
   padding-right: 32px;
 }
 
-/* Color swatches — rounded squares to match cards / inputs. */
-.swatch-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.swatch {
-  width: 28px; height: 28px;
-  border-radius: 8px;
-  border: 2px solid #fff;
-  box-shadow: 0 0 0 1px var(--line-2);
-  cursor: pointer;
-  transition: transform .15s, box-shadow .15s;
-}
-.swatch:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 0 0 1px var(--accent-2),
-              0 4px 10px -3px rgba(111,92,246,.35);
-}
-.swatch.active {
-  box-shadow: 0 0 0 2px var(--accent),
-              0 4px 12px -3px rgba(111,92,246,.45);
-  transform: translateY(-1px);
-}
-.swatch.none {
-  background: repeating-linear-gradient(45deg,
-              #fff, #fff 5px, var(--line-2) 5px, var(--line-2) 6px);
-}
-
 /* Action row. */
 .actions { display: flex; gap: 10px; justify-content: flex-end;
            align-items: center; margin-top: 4px; }

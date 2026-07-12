@@ -16,7 +16,6 @@ from .config import (
     RUN_SCAN_ARGS,
     TAPE_GIRTHS,
     VALID_GENDERS,
-    WAIST_COLORS,
 )
 
 
@@ -77,7 +76,7 @@ def validate(form: Mapping[str, str]) -> str | None:
 
     Mirrors run_scan.py's prerequisites: capture folder must exist on
     disk; person name + output prefix non-empty; at least one export
-    artifact selected; waist colour inside the allowed set.
+    artifact selected; numeric calibration fields positive when filled.
     """
     capture = (form.get("capture") or "").strip()
     person = (form.get("person") or "").strip()
@@ -94,10 +93,6 @@ def validate(form: Mapping[str, str]) -> str | None:
     if not (form.get("csv") or form.get("obj") or form.get("smis")):
         return "Pick at least one export artifact."
 
-    color = (form.get("color") or "none").strip()
-    if color not in WAIST_COLORS:
-        return f"Unknown waist colour: {color!r}"
-
     gender = (form.get("gender") or "female").strip()
     if gender not in VALID_GENDERS:
         return f"Unknown gender: {gender!r}"
@@ -109,10 +104,19 @@ def validate(form: Mapping[str, str]) -> str | None:
     if bday and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", bday):
         return f"Birthday must be yyyy-mm-dd: {bday!r}"
 
-    # Height + girths, when filled, must be positive numbers.
+    # Height + waist height + girths, when filled, must be positive numbers.
     if (form.get("height") or "").strip() and _parse_pos_float(
             form.get("height")) is None:
         return f"Height must be a positive number (cm): {form.get('height')!r}"
+    if (form.get("waist_height") or "").strip() and _parse_pos_float(
+            form.get("waist_height")) is None:
+        return ("Waist height must be a positive number (cm): "
+                f"{form.get('waist_height')!r}")
+    wh = _parse_pos_float(form.get("waist_height"))
+    h = _parse_pos_float(form.get("height"))
+    if wh is not None and h is not None and wh >= h:
+        return (f"Waist height ({wh:g} cm) must be smaller than "
+                f"height ({h:g} cm).")
     for field, _code, label in TAPE_GIRTHS:
         raw = (form.get(field) or "").strip()
         if raw and _parse_pos_float(raw) is None:
@@ -162,14 +166,16 @@ def build_cmd(form: Mapping[str, str]) -> list[str]:
         "--gender", gender,
         csv_flag, obj_flag, smis_flag,
     ]
-    color = (form.get("color") or "none").strip()
-    if color != "none":
-        cmd.extend(["--waist-color", color])
 
     # Height anchor (scale).
     height = _parse_pos_float(form.get("height"))
     if height is not None:
         cmd.extend(["--height", f"{height:g}"])
+
+    # Waist height anchor (floor → natural waist, pins the waist line Y).
+    waist_height = _parse_pos_float(form.get("waist_height"))
+    if waist_height is not None:
+        cmd.extend(["--waist-height", f"{waist_height:g}"])
 
     # Tape girth anchors → one --tape-anchor CODE=cm per filled field.
     for field, code, _label in TAPE_GIRTHS:

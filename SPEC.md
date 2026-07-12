@@ -135,7 +135,6 @@ tailor-twin/
     preprocess/
       depth_filter.py
       segment.py
-      waist_string.py         # HSV elastic detector
     reconstruct/
       tsdf.py
       cleanup.py
@@ -336,7 +335,7 @@ Repeat identically every scan:
 2. Compression wear. Hair tied back. Bralette without molded cups.
 3. Stand on a marked spot on the floor (taped X).
 4. A-pose: arms ~40° from body, palms forward, feet shoulder-width.
-5. Tie a string around natural waist (per Aldrich #2 instructions).
+5. Tie a string around natural waist (per Aldrich #2 instructions) and tape-measure the vertical floor → string distance; enter it as the waist-height anchor (`--waist-height` / GUI **Waist height**).
 6. Breathing: mid-exhale, relaxed.
 7. Helper holds phone at chest height, ~1.2-1.5m away.
 8. Press record. Helper walks slowly around you, ~25-30s for full loop.

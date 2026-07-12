@@ -468,11 +468,11 @@ WAIST_VID_LANDMARKS: frozenset[str] = frozenset({
     "waist_side_left",
     "waist_side_right",
 })
-# Names whose Y must follow the detected waist-string Y when override is
-# set. Compound landmarks that derive from these (waist_side_midpoint,
-# waist_string, waist_string-anchored snap_y_landmark / extend_to_y /
-# offset_y / body_at_xy entries) inherit the override automatically
-# because they call back through `__getitem__`.
+# Names whose Y must follow the waist-Y override when one is set (e.g.
+# from a tape-measured waist height). Compound landmarks that derive from
+# these (waist_side_midpoint, waist_string, waist_string-anchored
+# snap_y_landmark / extend_to_y / offset_y / body_at_xy entries) inherit
+# the override automatically because they call back through `__getitem__`.
 
 
 @dataclass(frozen=True)
@@ -485,11 +485,10 @@ class LandmarkSet:
     waist-anchored snap_y_landmark / extend_to_y / offset_y / body_at_xy)
     inherit automatically.
 
-    Use this to plumb the detected waist-string Y (from
-    `tailor_twin.preprocess.waist_string.detect_waist_y`) into the
-    measurement step so Aldrich #2, H05, J04, hip-level offsets, etc.
-    are anchored at the user's tied waist instead of SMPL-X's CAESAR-
-    learned anatomical waist.
+    Use this to plumb the tape-measured waist Y (via
+    `waist_y_from_height`) into the measurement step so Aldrich #2,
+    H05, J04, hip-level offsets, etc. are anchored at the user's tied
+    waist instead of SMPL-X's CAESAR-learned anatomical waist.
     """
 
     verts: np.ndarray  # (V, 3) fitted SMPL-X vertices
@@ -498,7 +497,7 @@ class LandmarkSet:
     faces: np.ndarray | None = None  # (F, 3) triangle indices (needed by
     # dynamic landmarks that call into recipe polylines, e.g. the SN→apex
     # ↔ G03 intersection used by H16)
-    waist_y_override: float | None = None  # world-frame Y from string detection
+    waist_y_override: float | None = None  # world-frame Y of the tied waist
     y_overrides: dict[str, float] | None = None  # leaf -> world-frame Y.
     # Generic per-landmark Y override. Applied AFTER waist_y_override and
     # AFTER vertex/compound/dynamic resolution, so girth-slicing anchors
@@ -520,7 +519,7 @@ class LandmarkSet:
             return self._joint(name.split(".", 1)[1])
         leaf = name.split(".", 1)[1] if name.startswith("landmarks.") else name
         pt = self._resolve(leaf)
-        # Apply detected-waist-string Y override AT the end, after compound
+        # Apply the waist-Y override AT the end, after compound
         # / dynamic resolution. Y-only — preserves the verified X/Z of
         # waist_cf / waist_cb / waist_side_left / waist_side_right.
         if (self.waist_y_override is not None
@@ -602,6 +601,22 @@ class LandmarkSet:
         return self.joints[SMPLX_JOINT_INDEX[joint_name]]
 
 
+def waist_y_from_height(verts: np.ndarray, waist_height_cm: float) -> float:
+    """World-frame waist Y from a tape-measured waist height (floor → natural
+    waist, vertical, cm).
+
+    Frame-robust by construction: the floor is re-derived as the mesh's own
+    minimum Y, so the same tape number is valid on the raw scan-frame fit,
+    the clean-fit canonical body, and the ring-deformed mesh alike — unlike a
+    stored absolute Y, which goes stale the moment the body is re-centred.
+    """
+    if not waist_height_cm > 0:
+        raise ValueError(
+            f"waist height must be positive (cm), got {waist_height_cm!r}")
+    floor_y = float(np.asarray(verts)[:, 1].min())
+    return floor_y + waist_height_cm / 100.0
+
+
 def load_vertex_ids(path: Path | str = DEFAULT_REVIEW_JSON) -> dict[str, int]:
     """Read the verified vertex IDs (with any status — confirmed, corrected,
     mirrored). Skipped entries are dropped."""
@@ -631,8 +646,8 @@ def build_landmark_set(
     fallback (acromion -> L_Shoulder, etc.).
 
     `waist_y_override` (world-frame Y, metres): replace the Y of every
-    landmark in `WAIST_VID_LANDMARKS`. Typical source: the detected
-    waist-string elastic Y from `tailor_twin.preprocess.waist_string`.
+    landmark in `WAIST_VID_LANDMARKS`. Typical source: a tape-measured
+    waist height converted with `waist_y_from_height`.
 
     `gender` selects between female-tuned vertex anchors (`bust_level` =
     `bust_apex_midpoint`) and anatomical searches for non-female bodies

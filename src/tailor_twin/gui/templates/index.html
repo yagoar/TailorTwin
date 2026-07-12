@@ -92,12 +92,14 @@
         </div>
       </div>
       <div class="grid">
-        <label class="field-label" for="color">Waist band</label>
+        <label class="field-label" for="waist_height">Waist height (cm)</label>
         <div>
-          <div id="swatches" class="swatch-row" aria-hidden="true"></div>
-          <input id="color" name="color" type="hidden" value="none">
-          <div class="help">Optional. Elastic in this colour overrides
-            the SMPL-X anatomical waist Y.</div>
+          <input id="waist_height" name="waist_height" type="number"
+                 step="0.1" min="0" placeholder="e.g. 100">
+          <div class="help">Optional but recommended. Vertical tape
+            distance floor → natural waist (where the string sits).
+            Pins the waist line exactly; without it the SMPL-X
+            anatomical waist is used.</div>
         </div>
       </div>
       <div class="grid">
@@ -211,7 +213,7 @@
         <ul>
           <li>Pick a uniformly lit room — diffuse daylight or a couple of soft lamps. Avoid hard shadows or direct sun stripes.</li>
           <li>Wear tight, single-colour fitted layers: leggings + tank top, or a swimsuit. Loose fabric = wrong silhouette.</li>
-          <li>Tie a contrast-colour elastic at your natural waist. Cyan or red works best against skin/dark clothing. The GUI's <b>Waist band</b> picker must match.</li>
+          <li>Tie a string or elastic at your natural waist, then tape-measure the vertical distance floor → string and enter it as <b>Waist height</b> in the Calibration card.</li>
           <li>Hair up so the neck and shoulders are visible.</li>
         </ul>
       </section>
@@ -252,7 +254,7 @@
         <ul>
           <li>Export the Stray capture folder (rgb.mp4, depth/, confidence/, odometry.csv, camera_matrix.csv) into <code>data/captures/&lt;name&gt;/</code>.</li>
           <li>Paste that path into <b>Stray folder</b>.</li>
-          <li>Pick the waist colour matching your elastic (or <i>none</i> to fall back to SMPL-X anatomical waist).</li>
+          <li>Fill in <b>Height</b> and <b>Waist height</b> (leave waist height blank to fall back to the SMPL-X anatomical waist).</li>
           <li>Hit <b>Run scan</b>. First-time runs take ~3-6 min on Apple Silicon. Watch the log for chamfer ≤ 0.0008 and "extracted" counts.</li>
         </ul>
       </section>
@@ -263,7 +265,7 @@
           <li><b>Loose clothing</b> → fit picks up fabric, not the body. Re-scan in tight layers.</li>
           <li><b>Glossy / black materials</b> → LiDAR returns are weak. Add light or change top.</li>
           <li><b>Single loop only</b> → upper-body fit suffers. Two loops at different heights matter.</li>
-          <li><b>Wrong elastic colour</b> → waist override fails silently and falls back to anatomical waist. Check the log.</li>
+          <li><b>No waist height entered</b> → the waist line falls back to the SMPL-X anatomical waist, which can sit 1-3 cm off where you tie your string. Measure it once, it rarely changes.</li>
           <li><b>Moving subject</b> → mesh shows ghosting. Stand still or shorten the sweep.</li>
         </ul>
       </section>

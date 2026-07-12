@@ -50,8 +50,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--waist-y", type=float, default=None,
                    help="World-frame Y override for the waist landmark "
                         "(same semantics as measure/cli.py --waist-y).")
-    p.add_argument("--waist-y-from", type=Path, default=None,
-                   help="Read waist Y from a WaistStringDetection JSON.")
+    p.add_argument("--waist-height-cm", type=float, default=None,
+                   help="Tape-measured waist height (floor → natural waist, "
+                        "vertical, cm). Frame-robust alternative to "
+                        "--waist-y: resolved as mesh min Y + height on the "
+                        "canonical body at every solver evaluation. "
+                        "--waist-y wins if both set.")
     p.add_argument("--a-pose-shoulder-deg", type=float, default=30.0,
                    help="Shoulder rotation (degrees) for the saved "
                         "canonical pose. 0 = T-pose, 30 = standard "
@@ -62,11 +66,8 @@ def main(argv: list[str] | None = None) -> int:
     targets = dict(_parse_target(s) for s in args.target)
 
     waist_y_override: float | None = args.waist_y
-    if waist_y_override is None and args.waist_y_from is not None:
-        from ..preprocess.waist_string import WaistStringDetection
-        waist_y_override = WaistStringDetection.from_json(args.waist_y_from).y_m
     if waist_y_override is not None:
-        print(f"waist-string Y override: {waist_y_override:.4f} m")
+        print(f"waist Y override: {waist_y_override:.4f} m")
 
     from .refine_to_tape import refine_betas_to_tape, save_refined_fit
     res = refine_betas_to_tape(
@@ -79,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         anchor_weight=args.anchor_weight,
         ridge=args.ridge,
         waist_y_override=waist_y_override,
+        waist_height_cm=args.waist_height_cm,
         a_pose_shoulder_deg=args.a_pose_shoulder_deg,
         verbose=True,
     )
@@ -113,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
     ]
     if waist_y_override is not None:
         cmd.extend(["--waist-y", str(waist_y_override)])
+    elif args.waist_height_cm is not None:
+        cmd.extend(["--waist-height-cm", str(args.waist_height_cm)])
     r = subprocess.run(cmd)
     if r.returncode != 0:
         print(f"measure.cli failed (exit {r.returncode})")

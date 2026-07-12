@@ -23,7 +23,6 @@ from .config import (
     GENDERS,
     REPO_ROOT,
     TAPE_GIRTHS,
-    WAIST_COLORS,
 )
 from .forms import (
     build_cmd,
@@ -46,7 +45,6 @@ def create_app(runner: Runner | None = None) -> Flask:
         return render_template(
             "index.html",
             today=dt.date.today().isoformat(),
-            colors=WAIST_COLORS,
             genders=GENDERS,
             girths=TAPE_GIRTHS,
             default_captures=str(DEFAULT_CAPTURES_DIR),

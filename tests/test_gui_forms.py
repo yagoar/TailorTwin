@@ -67,7 +67,6 @@ def _good(tmp_path: Path, **overrides) -> dict[str, str]:
         "csv": "on",
         "obj": "on",
         "smis": "on",
-        "color": "none",
         "birthday": "1990-05-17",
         "scan_date": "2026-05-17",
         "gender": "female",
@@ -98,11 +97,6 @@ def test_validate_missing_person(tmp_path: Path) -> None:
 def test_validate_no_export(tmp_path: Path) -> None:
     err = validate(_good(tmp_path, csv="", obj="", smis=""))
     assert err and "export" in err.lower()
-
-
-def test_validate_bad_color(tmp_path: Path) -> None:
-    err = validate(_good(tmp_path, color="hotpink"))
-    assert err and "colour" in err.lower()
 
 
 def test_validate_bad_birthday(tmp_path: Path) -> None:
@@ -137,7 +131,7 @@ def test_validate_enabled_genders_pass(tmp_path: Path) -> None:
 
 def test_build_cmd_minimal(tmp_path: Path) -> None:
     cmd = build_cmd(_good(
-        tmp_path, color="none", birthday="", person="Yaiza",
+        tmp_path, birthday="", person="Yaiza",
         csv="on", obj="", smis="",
     ))
     assert cmd[0] == PIPELINE_PY
@@ -149,7 +143,6 @@ def test_build_cmd_minimal(tmp_path: Path) -> None:
     assert "--export-csv" in cmd
     assert "--no-export-obj" in cmd
     assert "--no-export-smis" in cmd
-    assert "--waist-color" not in cmd
     assert "--person-birth-date" not in cmd
     assert "--person-given-name" in cmd
     assert cmd[cmd.index("--person-given-name") + 1] == "Yaiza"
@@ -186,13 +179,9 @@ def test_build_cmd_nests_out_prefix(tmp_path: Path) -> None:
 
 def test_build_cmd_full(tmp_path: Path) -> None:
     cmd = build_cmd(_good(
-        tmp_path, color="cyan", birthday="1990-05-17",
+        tmp_path, birthday="1990-05-17",
         person="Yaiza Gomez Perez",
     ))
-    assert ["--waist-color", "cyan"] == [
-        cmd[cmd.index("--waist-color")],
-        cmd[cmd.index("--waist-color") + 1],
-    ]
     assert ["--person-birth-date", "1990-05-17"] == [
         cmd[cmd.index("--person-birth-date")],
         cmd[cmd.index("--person-birth-date") + 1],
@@ -220,7 +209,35 @@ def test_build_cmd_height_and_girths(tmp_path: Path) -> None:
 def test_build_cmd_no_calibration_when_blank(tmp_path: Path) -> None:
     cmd = build_cmd(_good(tmp_path))
     assert "--height" not in cmd
+    assert "--waist-height" not in cmd
     assert "--tape-anchor" not in cmd
+
+
+def test_build_cmd_waist_height(tmp_path: Path) -> None:
+    cmd = build_cmd(_good(tmp_path, waist_height="100.5"))
+    assert ["--waist-height", "100.5"] == [
+        cmd[cmd.index("--waist-height")],
+        cmd[cmd.index("--waist-height") + 1],
+    ]
+
+
+def test_validate_waist_height_ok(tmp_path: Path) -> None:
+    assert validate(_good(tmp_path, waist_height="100")) is None
+    assert validate(_good(tmp_path, waist_height="")) is None
+
+
+def test_validate_bad_waist_height(tmp_path: Path) -> None:
+    for bad in ("abc", "-5", "0"):
+        err = validate(_good(tmp_path, waist_height=bad))
+        assert err and "waist height" in err.lower(), bad
+
+
+def test_validate_waist_height_exceeds_height(tmp_path: Path) -> None:
+    err = validate(_good(tmp_path, height="160", waist_height="170"))
+    assert err and "smaller than" in err
+    # equal is also rejected; and without a height it can't be checked.
+    assert validate(_good(tmp_path, height="160", waist_height="160"))
+    assert validate(_good(tmp_path, waist_height="170")) is None
 
 
 def test_build_cmd_pose_graph_and_clean_fit(tmp_path: Path) -> None:

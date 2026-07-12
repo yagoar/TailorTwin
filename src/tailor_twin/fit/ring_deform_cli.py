@@ -17,6 +17,7 @@ Example::
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -79,6 +80,14 @@ def main(argv: list[str] | None = None) -> int:
                         "mesh min Y + height on the re-posed mesh each "
                         "pass, so it survives the canonical re-centre and "
                         "the A01 height scale. --waist-y wins if both set.")
+    p.add_argument("--audit", action=argparse.BooleanOptionalAction,
+                   default=True,
+                   help="Write <out-prefix>_tape_audit.json comparing the "
+                        "full measurement catalog before vs after the "
+                        "deformation, and warn about UNANCHORED codes that "
+                        "moved > 1 cm (i.e. where the tape anchoring pulled "
+                        "the mesh away from the scan). Costs two extra "
+                        "extractor runs. Default on.")
     p.add_argument("--a-pose-shoulder-deg", type=float, default=30.0,
                    help="Re-pose the fit to canonical A-pose before "
                         "deforming (0 = T-pose). The chamfer-fit mesh "
@@ -204,6 +213,19 @@ def main(argv: list[str] | None = None) -> int:
                 t.y_level = y_min + (t.y_level - y_min) * s
             print(f"A01 height: {cur_h:.2f} → ×{s:.4f} → {height_target} cm")
 
+    # Baseline catalog for the tape audit — taken AFTER the A01 height
+    # scale (a uniform scale legitimately moves every girth) and BEFORE
+    # the ring deformation, so the audit isolates the rings' collateral
+    # effect on codes nobody anchored.
+    audit_before: dict[str, float] | None = None
+    if args.audit:
+        lm_a = build_landmark_set(
+            deformed.astype(np.float32), joints=joints, faces=faces,
+            gender=gender)
+        audit_before = {k: float(v) for k, v in extract_catalog(
+            deformed.astype(np.float32), faces, joints=joints,
+            gender=gender, landmarks=lm_a).values.items()}
+
     # Extractor-driven deformation loop. The real seamly extractor is
     # the single source of truth for the current circumference; the
     # geometric scale per ring is target / extractor_current. Iterating
@@ -310,6 +332,41 @@ def main(argv: list[str] | None = None) -> int:
     payload["z"] = np.array([])
     np.savez(out_npz, **payload)
     print(f"\nwrote {out_npz}")
+
+    # ---- Tape audit: did the deformation move anything nobody anchored?
+    # Best-effort — an audit failure must not fail the calibration.
+    if args.audit and audit_before is not None:
+        try:
+            from .ring_deform import audit_girth_drift
+            lm_z = build_landmark_set(
+                deformed.astype(np.float32), joints=joints, faces=faces,
+                gender=gender)
+            audit_after = {k: float(v) for k, v in extract_catalog(
+                deformed.astype(np.float32), faces, joints=joints,
+                gender=gender, landmarks=lm_z).values.items()}
+            anchored = set(targets_cm) | set(leg_targets)
+            audit = audit_girth_drift(audit_before, audit_after, anchored)
+            audit_path = out_prefix.with_name(
+                out_prefix.name + "_tape_audit.json")
+            audit_path.write_text(json.dumps(audit, indent=2))
+            flagged = audit["flagged_unanchored"]
+            if flagged:
+                print(f"tape audit: {len(flagged)} UNANCHORED code(s) moved "
+                      f"> {audit['tol_cm']:.1f} cm — the anchoring pulled "
+                      "these away from the scan:")
+                for code in flagged[:10]:
+                    e = audit["drift"][code]
+                    print(f"  {code}: {e['before_cm']:.2f} → "
+                          f"{e['after_cm']:.2f} cm ({e['delta_cm']:+.2f})")
+                if len(flagged) > 10:
+                    print(f"  … and {len(flagged) - 10} more (see "
+                          f"{audit_path.name})")
+            else:
+                print(f"tape audit: no unanchored code moved > "
+                      f"{audit['tol_cm']:.1f} cm")
+            print(f"wrote {audit_path}")
+        except Exception as e:  # noqa: BLE001
+            print(f"tape audit skipped ({e})")
 
     # Re-run the measure CLI for CSV / SMIS / OBJ.
     out_csv = out_prefix.with_name(out_prefix.name + "_measurements.csv")

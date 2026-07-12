@@ -309,6 +309,44 @@ def run(
         print(f"  measure.cli failed (exit {r.returncode})")
         return r.returncode
 
+    # ---- 4b. Measurement history: record the run and report drift vs the
+    # same person's previous run. Repeatability is the metric that matters
+    # for a personal tool — a code that jumped ≥ 1 cm between two scans of
+    # the same body flags a capture/anchor problem NOW rather than as a
+    # garment that doesn't fit. Best-effort: never fails the scan.
+    try:
+        from tailor_twin.history import (
+            drift_rows, history_db_for, previous_values, record_run,
+        )
+        values = {k: float(v)
+                  for k, v in json.loads(json_path.read_text()).items()}
+        person = f"{person_given_name} {person_family_name}".strip() or "unknown"
+        db = history_db_for(out_prefix)
+        prev = previous_values(db, person=person)
+        record_run(db, person=person, out_prefix=str(out_prefix),
+                   values=values,
+                   meta={"gender": gender, "num_betas": num_betas,
+                         "tape_anchors": tape_anchors or {},
+                         "waist_height_cm": waist_height_cm,
+                         "height_cm": height_cm})
+        if prev is None:
+            print(f"  history: first recorded run for {person!r} ({db})")
+        else:
+            moved = drift_rows(values, prev, tol_cm=1.0)
+            if moved:
+                print(f"  history: {len(moved)} code(s) moved ≥ 1.0 cm vs "
+                      f"{person!r}'s previous run:")
+                for code, p_cm, c_cm, d in moved[:10]:
+                    print(f"    {code}: {p_cm:.2f} → {c_cm:.2f} cm "
+                          f"({d:+.2f})")
+                if len(moved) > 10:
+                    print(f"    … and {len(moved) - 10} more")
+            else:
+                print("  history: consistent with previous run (< 1.0 cm "
+                      "drift on every shared code)")
+    except Exception as e:  # noqa: BLE001 — history must never break a scan
+        print(f"  history: skipped ({e})")
+
     # ---- 5. Bent-arm npz + json (for review viewer + audit).
     print("[5/5] bent-arm re-pose for L01/L02/L03/L04")
     cmd = [
@@ -479,6 +517,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.height is not None:
         anchor_dict.setdefault("A01", float(args.height))
 
+    # Provenance: record the exact configuration + code version + outcome
+    # next to the artifacts, whether the run succeeds or dies mid-stage.
+    from tailor_twin.manifest import utc_now_iso, write_manifest
+    started = utc_now_iso()
+    rc = 1  # what the manifest reports if run() raises
+    try:
+        rc = _run_with_args(args, native_size, anchor_dict)
+    finally:
+        try:
+            mpath = write_manifest(args.out_prefix, config=vars(args),
+                                   rc=rc, started=started,
+                                   finished=utc_now_iso())
+            print(f"  manifest:      {mpath}")
+        except Exception as e:  # noqa: BLE001 — provenance is best-effort
+            print(f"  manifest: skipped ({e})")
+    return rc
+
+
+def _run_with_args(args, native_size, anchor_dict) -> int:
     return run(
         capture=args.capture,
         out_prefix=args.out_prefix,

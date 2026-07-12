@@ -102,7 +102,17 @@ data/results/yaiza_20260517_aldrich.csv       # filtered named CSV
 data/results/yaiza_20260517_seamly_catalog.json
 data/results/yaiza_20260517.smis              # SeamlyMe XML
 data/results/yaiza_20260517_bent_arm.{json,npz}
+data/results/yaiza_20260517_manifest.json     # full run config + git commit
+data/results/yaiza_20260517_tape_audit.json   # if tape-anchored: pre/post drift
+data/results/history.sqlite                   # per-person measurement history
 ```
+
+Every run records its measurements into `history.sqlite` and prints any
+code that drifted ≥ 1 cm versus the same person's previous run — the
+repeatability check that catches a bad capture immediately. Tape-anchored
+runs also write a **tape audit** flagging any *unanchored* measurement the
+ring calibration moved by more than 1 cm (i.e. where anchoring pulled the
+mesh away from the scan).
 
 ## Package layout
 

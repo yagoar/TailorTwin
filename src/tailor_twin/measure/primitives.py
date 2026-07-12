@@ -30,13 +30,6 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.spatial import ConvexHull, QhullError, cKDTree
 
 
-# Exception groups for narrowed `except` blocks. Splitting by failure
-# mode means a genuine bug (TypeError, AttributeError, KeyError) bubbles
-# up instead of being silently swallowed as NaN.
-SOLVER_ERRORS = (RuntimeError, IndexError)  # potpourri3d geodesic solver
-HULL_ERRORS = (QhullError, ValueError, IndexError)  # scipy ConvexHull
-SPLINE_ERRORS = (RuntimeError, ValueError, TypeError)  # scipy splprep
-
 from .landmarks import LandmarkSet
 from .mesh_ops import (
     _build_loops,
@@ -48,6 +41,14 @@ from .mesh_ops import (
     slice_mesh,
 )
 from .regions import region_vertex_mask
+
+
+# Exception groups for narrowed `except` blocks. Splitting by failure
+# mode means a genuine bug (TypeError, AttributeError, KeyError) bubbles
+# up instead of being silently swallowed as NaN.
+SOLVER_ERRORS = (RuntimeError, IndexError)  # potpourri3d geodesic solver
+HULL_ERRORS = (QhullError, ValueError, IndexError)  # scipy ConvexHull
+SPLINE_ERRORS = (RuntimeError, ValueError, TypeError)  # scipy splprep
 
 
 # ---------------------------------------------------------------------------
@@ -1100,7 +1101,8 @@ class TapeLoop:
         else:
             arc1 = list(range(pos_R, pos_L + 1))
             arc2 = list(range(pos_L, h)) + list(range(0, pos_R + 1))
-        a1 = hull[arc1]; a2 = hull[arc2]
+        a1 = hull[arc1]
+        a2 = hull[arc2]
         want_back = side == "back"
         if want_back:
             chosen = a1 if a1[:, 2].mean() < a2[:, 2].mean() else a2

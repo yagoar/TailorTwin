@@ -78,8 +78,8 @@ def _horizontal_ruler(anchor_a, anchor_b, body_v, offset: float = 0.10):
     to the side. Either way each leader is a short single-axis segment
     from anchor → bar endpoint.
     """
-    ax = float(anchor_a[0]); ay = float(anchor_a[1]); az = float(anchor_a[2])
-    bx = float(anchor_b[0]); by = float(anchor_b[1]); bz = float(anchor_b[2])
+    ax, ay, az = (float(anchor_a[0]), float(anchor_a[1]), float(anchor_a[2]))
+    bx, by, bz = (float(anchor_b[0]), float(anchor_b[1]), float(anchor_b[2]))
     bar_y = ay  # planar — anchors usually share Y
     if abs(bx - ax) >= abs(bz - az):
         # X-dominant: bar in front (max Z + offset), runs along X.

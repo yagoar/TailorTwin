@@ -56,6 +56,31 @@ def test_drift_rows_thresholds_and_sorting() -> None:
     assert d == -3.0
 
 
+def test_cli_lists_persons_runs_and_drift(tmp_path: Path, capsys) -> None:
+    from tailor_twin.history import main
+
+    db = tmp_path / "history.sqlite"
+    assert main(["--db", str(db)]) == 1  # no DB yet
+
+    record_run(db, person="Yaiza", out_prefix="r1",
+               values={"G07": 69.0, "G04": 87.5})
+    record_run(db, person="Yaiza", out_prefix="r2",
+               values={"G07": 71.0, "G04": 87.6})
+    capsys.readouterr()
+
+    assert main(["--db", str(db)]) == 0  # person listing
+    out = capsys.readouterr().out
+    assert "Yaiza" in out and "2" in out
+
+    assert main(["Yaiza", "--db", str(db)]) == 0
+    out = capsys.readouterr().out
+    assert "r2" in out and "r1" in out
+    assert "G07: 69.00 → 71.00 cm (+2.00)" in out
+    assert "G04" not in out.split("drift")[1]  # 0.1 cm — below tol
+
+    assert main(["Nobody", "--db", str(db)]) == 1
+
+
 def test_history_db_location_flat_and_nested(tmp_path: Path) -> None:
     # GUI-nested prefix <results>/<stem>/<stem> → DB in <results>/.
     nested = tmp_path / "results" / "yaiza_x" / "yaiza_x"

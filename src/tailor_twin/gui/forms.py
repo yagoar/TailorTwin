@@ -181,6 +181,10 @@ def build_cmd(form: Mapping[str, str]) -> list[str]:
     # Drift-corrected fusion (opt-in checkbox).
     if form.get("pose_graph"):
         cmd.append("--pose-graph")
+    # EXPERIMENTAL fusion-free fit (ROADMAP B1): skip TSDF, fit SMPL-X
+    # straight to the multi-frame point cloud.
+    if form.get("no_fusion"):
+        cmd.append("--no-fusion")
     # Clean-fit (symmetrize + head/hand + A-pose) is on by default in the
     # pipeline; emit the opt-out only when the box is explicitly unchecked.
     if "clean_fit" in form and not form.get("clean_fit"):

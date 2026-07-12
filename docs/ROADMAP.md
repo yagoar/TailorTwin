@@ -72,7 +72,7 @@ user effort?*
 |---|-----------|-------------|--------------|------------------|--------|
 | A | Synthetic validation harness | both (safety net) | yes (user machine) | small OK, verify on user machine | implemented — generate snapshot on user machine |
 | B | Self-rotation capture (no helper) | 1 | yes + research | **capable model + human review** | B1 implemented, awaiting user A/B run |
-| C | CLO3D avatar quality | 2 | partly | small OK (docs/export), human verifies in CLO3D | todo |
+| C | CLO3D avatar quality | 2 | partly | small OK (docs/export), human verifies in CLO3D | doc + checklist written (`docs/clo3d_avatar.md`); UVs/pose-field todo |
 | D | Anthropometric sanity layer | 1 | partly | small OK (SMPL-X path); medium for external data | sources researched |
 | E | Uncertainty + block-critical tier | both | partly | small OK for tiering; medium for uncertainty | todo |
 | F | In-process pipeline refactor | maintainability | yes (verification) | medium; gate on A | todo |

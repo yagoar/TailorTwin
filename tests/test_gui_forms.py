@@ -220,6 +220,11 @@ def test_validate_waist_height_exceeds_height(tmp_path: Path) -> None:
     assert validate(_good(tmp_path, waist_height="170")) is None
 
 
+def test_build_cmd_no_fusion(tmp_path: Path) -> None:
+    assert "--no-fusion" in build_cmd(_good(tmp_path, no_fusion="on"))
+    assert "--no-fusion" not in build_cmd(_good(tmp_path))
+
+
 def test_build_cmd_pose_graph_and_clean_fit(tmp_path: Path) -> None:
     cmd = build_cmd(_good(tmp_path, pose_graph="on"))
     assert "--pose-graph" in cmd

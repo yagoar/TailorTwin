@@ -136,6 +136,7 @@ references/         # source PDFs/notes for Aldrich + dpm
 ## Docs
 
 - [`SPEC.md`](SPEC.md) — project spec (pipeline, accuracy targets, schema)
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — planned improvements, prioritized against the two project goals (simpler capture, CLO3D-ready avatar); written so any future session can pick up a workstream
 - [`GUARDRAILS.md`](GUARDRAILS.md) — AI-generation rules for this repo
 - [`docs/recipes.md`](docs/recipes.md) — measurement-recipe glossary
 - [`docs/catalog_coverage.md`](docs/catalog_coverage.md) — auto-generated table of every Seamly code + status

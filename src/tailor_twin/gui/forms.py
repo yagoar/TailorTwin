@@ -16,7 +16,6 @@ from .config import (
     RUN_SCAN_ARGS,
     TAPE_GIRTHS,
     VALID_GENDERS,
-    WAIST_COLORS,
 )
 
 
@@ -77,7 +76,7 @@ def validate(form: Mapping[str, str]) -> str | None:
 
     Mirrors run_scan.py's prerequisites: capture folder must exist on
     disk; person name + output prefix non-empty; at least one export
-    artifact selected; waist colour inside the allowed set.
+    artifact selected; numeric calibration fields positive when filled.
     """
     capture = (form.get("capture") or "").strip()
     person = (form.get("person") or "").strip()
@@ -93,10 +92,6 @@ def validate(form: Mapping[str, str]) -> str | None:
         return "Output prefix is empty."
     if not (form.get("csv") or form.get("obj") or form.get("smis")):
         return "Pick at least one export artifact."
-
-    color = (form.get("color") or "none").strip()
-    if color not in WAIST_COLORS:
-        return f"Unknown waist colour: {color!r}"
 
     gender = (form.get("gender") or "female").strip()
     if gender not in VALID_GENDERS:
@@ -171,9 +166,6 @@ def build_cmd(form: Mapping[str, str]) -> list[str]:
         "--gender", gender,
         csv_flag, obj_flag, smis_flag,
     ]
-    color = (form.get("color") or "none").strip()
-    if color != "none":
-        cmd.extend(["--waist-color", color])
 
     # Height anchor (scale).
     height = _parse_pos_float(form.get("height"))

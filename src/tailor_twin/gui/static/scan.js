@@ -1,8 +1,8 @@
 // TailorTwin scan GUI — client logic.
 //
 // Reads bootstrap config from the global window.MYFIT_CFG that
-// index.html renders, wires up the form, swatches, the SSE log
-// stream, and the how-to modal.
+// index.html renders, wires up the form, the SSE log stream, and
+// the how-to modal.
 
 (function () {
   const cfg = window.MYFIT_CFG || {};
@@ -28,35 +28,6 @@
     $(id).addEventListener("input", refreshPrefix),
   );
   refreshPrefix();
-
-  // --- Colour swatches ---------------------------------------------------
-  const COLOR_HEX = {
-    none: null,
-    red: "#d4302d",
-    cyan: "#1cb6c4",
-    green: "#3aa45a",
-    magenta: "#c8329b",
-    yellow: "#f1c33b",
-    blue: "#2f6fdb",
-    orange: "#e98330",
-  };
-  const swatchHolder = $("swatches");
-  Object.entries(COLOR_HEX).forEach(([name, hex]) => {
-    const el = document.createElement("button");
-    el.type = "button";
-    el.className = "swatch" + (name === "none" ? " none" : "");
-    if (hex) el.style.background = hex;
-    el.title = name;
-    el.dataset.value = name;
-    el.addEventListener("click", () => {
-      $("color").value = name;
-      swatchHolder.querySelectorAll(".swatch").forEach((s) =>
-        s.classList.toggle("active", s.dataset.value === name),
-      );
-    });
-    swatchHolder.appendChild(el);
-  });
-  swatchHolder.firstChild.classList.add("active");
 
   // --- Run / cancel + SSE log stream -------------------------------------
   let evtSource = null;

@@ -24,11 +24,6 @@ PIPELINE_PY: str = str(_VENV_PY) if _VENV_PY.is_file() else sys.executable
 # every request.
 RUN_SCAN_ARGS: tuple[str, ...] = ("-m", "tailor_twin.scan")
 
-WAIST_COLORS: tuple[str, ...] = (
-    "none", "red", "cyan", "green",
-    "magenta", "yellow", "blue", "orange",
-)
-
 # Optional tape-measured girths the GUI can collect to calibrate the fit
 # exactly (passed to the pipeline as --tape-anchor CODE=cm). Each tuple is
 # (form field name, seamly code, human label). Torso girths scale about the

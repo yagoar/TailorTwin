@@ -50,8 +50,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--waist-y", type=float, default=None,
                    help="World-frame Y override for the waist landmark "
                         "(same semantics as measure/cli.py --waist-y).")
-    p.add_argument("--waist-y-from", type=Path, default=None,
-                   help="Read waist Y from a WaistStringDetection JSON.")
     p.add_argument("--waist-height-cm", type=float, default=None,
                    help="Tape-measured waist height (floor → natural waist, "
                         "vertical, cm). Frame-robust alternative to "
@@ -68,11 +66,8 @@ def main(argv: list[str] | None = None) -> int:
     targets = dict(_parse_target(s) for s in args.target)
 
     waist_y_override: float | None = args.waist_y
-    if waist_y_override is None and args.waist_y_from is not None:
-        from ..preprocess.waist_string import WaistStringDetection
-        waist_y_override = WaistStringDetection.from_json(args.waist_y_from).y_m
     if waist_y_override is not None:
-        print(f"waist-string Y override: {waist_y_override:.4f} m")
+        print(f"waist Y override: {waist_y_override:.4f} m")
 
     from .refine_to_tape import refine_betas_to_tape, save_refined_fit
     res = refine_betas_to_tape(

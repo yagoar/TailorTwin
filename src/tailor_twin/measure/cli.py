@@ -182,16 +182,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument(
         "--waist-y", type=float, default=None,
-        help="World-frame Y (metres) of the detected waist-string elastic. "
-             "Overrides the SMPL-X anatomical waist Y for every waist-"
-             "anchored landmark (waist_cf, waist_cb, waist_side_left/right "
-             "and everything that derives from them).",
-    )
-    p.add_argument(
-        "--waist-y-from", type=Path, default=None,
-        help="JSON file written by waist_string.detect_waist_y "
-             "(`{ \"y_m\": float, ... }`). Reads y_m; equivalent to "
-             "--waist-y but persists the detection metadata alongside.",
+        help="World-frame Y (metres) of the natural waist. Overrides the "
+             "SMPL-X anatomical waist Y for every waist-anchored landmark "
+             "(waist_cf, waist_cb, waist_side_left/right and everything "
+             "that derives from them). Expert flag — must be in the fit's "
+             "own frame; prefer --waist-height-cm.",
     )
     p.add_argument(
         "--waist-height-cm", type=float, default=None,
@@ -199,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
              "cm). Resolved against THIS fit's mesh (waist Y = mesh min Y + "
              "height), so it stays valid after clean-fit / ring-deform "
              "re-centre the body — unlike an absolute --waist-y. "
-             "Precedence: --waist-y > --waist-height-cm > --waist-y-from.",
+             "--waist-y wins if both are set.",
     )
     p.add_argument(
         "--landmark-vid", action="append", default=None, metavar="NAME=VID",
@@ -245,7 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     joints = (fit["smplx_joints"].astype(np.float32)
               if "smplx_joints" in fit.files else None)
 
-    # Resolve waist-Y override (--waist-y > --waist-height-cm > JSON file).
+    # Resolve waist-Y override (--waist-y > --waist-height-cm).
     # --waist-height-cm is floor-relative and resolved against THIS mesh,
     # so it needs the fit's vertices — hence resolution happens here, after
     # the npz load.
@@ -255,10 +250,7 @@ def main(argv: list[str] | None = None) -> int:
         waist_y_override = waist_y_from_height(verts, args.waist_height_cm)
         print(f"waist height {args.waist_height_cm:.1f} cm above floor "
               f"→ Y override {waist_y_override:.4f} m")
-    if waist_y_override is None and args.waist_y_from is not None:
-        from ..preprocess.waist_string import WaistStringDetection
-        waist_y_override = WaistStringDetection.from_json(args.waist_y_from).y_m
-    if waist_y_override is not None:
+    elif waist_y_override is not None:
         print(f"waist Y override: {waist_y_override:.4f} m")
     from ..fit.fit import fit_gender, fit_person_info
     gender = args.gender or fit_gender(fit)

@@ -51,7 +51,7 @@ height and any girths you care about to pin them exactly:
 
 ```bash
 tailor-twin scan data/captures/NAME --out-prefix data/results/NAME \
-  --use-displacement --waist-color cyan \
+  --use-displacement \
   --height 160 --waist-height 100 \
   --tape-anchor G04=87.5 --tape-anchor G07=69 \
   --tape-anchor G09=99 --tape-anchor M07=34
@@ -67,8 +67,8 @@ Anchorable codes: torso `G03` high-bust, `G04` bust, `G05` underbust,
 side) pins the *height* of the waist line for every waist-anchored
 measurement. It travels through the pipeline as a floor-relative value,
 so it stays valid after clean-fit / ring-deform re-centre the body into
-the canonical frame. It takes precedence over `--waist-color` (the HSV
-elastic detection) when both are given.
+the canonical frame. Without it the SMPL-X anatomical waist is used,
+which can sit 1-3 cm off the tied-string waist.
 
 ## Pipeline
 
@@ -102,7 +102,6 @@ data/results/yaiza_20260517_aldrich.csv       # filtered named CSV
 data/results/yaiza_20260517_seamly_catalog.json
 data/results/yaiza_20260517.smis              # SeamlyMe XML
 data/results/yaiza_20260517_bent_arm.{json,npz}
-data/results/yaiza_20260517_waist_y.json      # if elastic detected
 ```
 
 ## Package layout
@@ -113,7 +112,7 @@ src/tailor_twin/
   scan.py           # full pipeline runner (was scripts/run_scan.py)
   preflight.py      # capture pre-flight inspector
   io/               # Stray Scanner frame loader
-  preprocess/       # depth filter, segmentation, waist-string detect
+  preprocess/       # depth filter, segmentation
   reconstruct/      # TSDF fuse (intrinsics rescale) + mesh cleanup (floor crop)
   fit/              # SMPL-X+D fitter, clean-fit, ring-deform tape anchors
   measure/          # landmarks, Seamly catalog + extractor, exports

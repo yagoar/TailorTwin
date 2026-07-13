@@ -142,32 +142,41 @@ tailor-twin/
     cli.py                    # Typer console script entry
     scan.py                   # end-to-end pipeline (capture → measurements)
     preflight.py              # capture sanity-check
+    history.py                # per-person measurement history (SQLite) + CLI
+    manifest.py               # per-run provenance JSON
     io/stray_loader.py
     preprocess/
       depth_filter.py
       segment.py
     reconstruct/
-      tsdf.py
+      tsdf.py                 # TSDF fusion (default chamfer target)
+      frames_cloud.py         # EXPERIMENTAL --no-fusion multi-frame cloud
       cleanup.py
     fit/
-      fit.py                  # SMPL-X+D mesh-to-mesh fitter
-      cli.py
+      fit.py                  # SMPL-X+D mesh/cloud fitter (SMPLify-X based)
+      align.py                # initial rigid alignment
+      losses.py               # chamfer + priors
+      vposer.py               # VPoser wrapper
+      clean_fit.py            # symmetrise, head/hand mask, canonical A-pose
+      ring_deform.py          # tape-anchor ring calibration + audit
+      ring_deform_cli.py
+      refine_to_tape.py       # betas-solve alternative calibrator
+      refine_to_tape_cli.py
     measure/
       definitions/
-        merged.yaml           # Aldrich + dpm measurement definitions
+        merged.yaml           # Aldrich + dpm definitions (provenance record)
         aldrich_size_chart_p13.yaml
       landmarks.py            # SMPL-X vertex landmarks + dynamic searches
-      primitives.py           # planar_slice, geodesic, plumb, hull, …
+      primitives.py           # recipe primitives (girth, geodesic, plumb, …)
       mesh_ops.py             # slice + loop selection helpers
+      regions.py              # body-region vertex masks
       seamly_catalog.py       # all 245 Seamly codes
-      recipes.py              # merged.yaml dispatch
-      extractor.py            # merged.yaml runner
       seamly_extractor.py     # Seamly-catalog runner
+      synthetic.py            # synthetic-body validation harness
       bent_arm.py             # elbow re-pose
       extract_bent_arm.py     # CLI wrapper
       exports.py              # CSV / SMIS / OBJ writers
-      review_viewer.py        # legacy Dash review tool
-      viewer.py               # shared 3D plotly helpers
+      viewer.py               # Dash review tool + plotly helpers
       cli.py                  # `python -m tailor_twin.measure.cli`
     gui/
       app.py                  # Flask factory + routes
@@ -180,13 +189,12 @@ tailor-twin/
       static/                 # styles.css, scan.js, viewer.js, favicon.svg
   scripts/                    # dev utilities only
     dump_recipe_table.py      # regenerates docs/catalog_coverage.md
-    export_seamlyme.py        # direct SMIS export from a fit npz
-  tests/
-    test_gui_app.py
-    test_gui_forms.py
-    test_gui_viewer.py
-    test_yaiza_snapshot.py    # measurement regression gate
+    validate_synthetic.py     # synthetic-body harness CLI (ROADMAP A)
+    landmark_editor.py        # photo-based landmark Y editor
+    pick_vertex.py            # interactive Plotly vertex picker
+  tests/                      # unit + snapshot regression (see tests/)
   docs/
+    ROADMAP.md                # prioritized improvement plan
     recipes.md
     catalog_coverage.md       # auto-generated
 ```

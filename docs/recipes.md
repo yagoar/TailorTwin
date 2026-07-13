@@ -22,10 +22,8 @@ centimetres.
 | Vertical tape clinging to body at fixed X | `SurfacePlumb` |
 | As above, then straight chord to a landmark | `SurfacePlumbThenDrop` |
 | Diagonal surface tape between two points, tilted vertical plane | `DiagonalSurfacePlumb` |
-| Three-point yardstick touching body at mid-Y | `DiagonalYardstick` |
 | Geodesic, then straight drop to floor | `GeodesicThenDrop` |
-| Highbust tape: planar back arc + geodesic front | `HybridLoop` / `TapeLoop` |
-| Smooth closed B-spline snapped to body | `SmoothLoop` |
+| Highbust tape: planar back arc + geodesic front | `TapeLoop` |
 | Arithmetic over already-computed codes | `Formula` (see `seamly_catalog.py::FORMULAS`) |
 
 ## Recipe details
@@ -108,34 +106,16 @@ chord below. Optional `chord_endpoint`: end the chord at a different
 landmark (e.g. waist_cf for H06). `truncate=True`: stop at the arc
 (no trailing chord).
 
-### `DiagonalYardstick(start, end, mid_y_landmark, side="front", y_band=0.012)`
-Three-point yardstick. Mid touch point = body surface vertex at
-`mid_y_landmark.y` nearest (in X/Z) to where the straight chord
-crosses that Y. Models a tape stretched start→end that falls
-against the bust line.
-
 ### `GeodesicThenDrop(waypoints, target_y_landmark)`
 Surface geodesic through waypoints, then straight vertical chord
 from the last waypoint to `target_y_landmark.y` at the last point's
 X/Z. Used for outseam-style tapes (waist→side→floor).
-
-### `HybridLoop(plane_landmark, planar_side, arc_endpoints, geodesic_waypoints=(), regions=("torso",))`
-Half horizontal-planar arc on one side of the body, half geodesic
-on the other. Used when one half of a girth should stay parallel
-to the floor (back) while the other half curves over a bulge
-(front, over the bust).
 
 ### `TapeLoop(plane_landmark, side_endpoints, front_waypoints=None, regions=("torso",))`
 Closed highbust-style loop. Back = planar slice at `plane_landmark.y`
 convex-hulled from L→R via CB. Front = either the front half of the
 same planar slice (if `front_waypoints is None`) or a geodesic
 through `front_waypoints` between the side endpoints.
-
-### `SmoothLoop(waypoints)`
-Periodic cubic B-spline (splprep, per=True) through anchor
-landmarks. Each spline sample is replaced with the nearest body
-vertex (small outward normal offset for viz). Tape that touches the
-anatomical anchors AND hugs the body between them, no V-dips.
 
 ### `Formula(expr)` *(see `seamly_catalog.py::FORMULAS`)*
 Arithmetic over already-computed Seamly codes. `expr` is a Python

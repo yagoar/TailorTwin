@@ -30,8 +30,6 @@ import numpy as np
 import smplx
 import torch
 
-from ..measure.landmarks import build_landmark_set
-from ..measure.seamly_catalog import RECIPES
 from ..measure.seamly_extractor import extract_catalog
 
 

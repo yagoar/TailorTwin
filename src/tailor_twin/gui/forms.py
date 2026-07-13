@@ -31,16 +31,6 @@ def _parse_pos_float(raw: str | None) -> float | None:
     return v if v > 0 else None
 
 
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
-
-
-def slugify(name: str) -> str:
-    """Lowercase, ASCII, underscore-separated stem. Empty → 'scan'."""
-    s = (name or "").strip().lower()
-    s = _SLUG_RE.sub("_", s).strip("_")
-    return s or "scan"
-
-
 def nest_out_prefix(out_prefix: str) -> str:
     """Fold a run's artifacts into a per-run folder.
 
@@ -191,6 +181,10 @@ def build_cmd(form: Mapping[str, str]) -> list[str]:
     # Drift-corrected fusion (opt-in checkbox).
     if form.get("pose_graph"):
         cmd.append("--pose-graph")
+    # EXPERIMENTAL fusion-free fit (ROADMAP B1): skip TSDF, fit SMPL-X
+    # straight to the multi-frame point cloud.
+    if form.get("no_fusion"):
+        cmd.append("--no-fusion")
     # Clean-fit (symmetrize + head/hand + A-pose) is on by default in the
     # pipeline; emit the opt-out only when the box is explicitly unchecked.
     if "clean_fit" in form and not form.get("clean_fit"):

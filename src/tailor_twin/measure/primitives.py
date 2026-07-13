@@ -21,21 +21,14 @@ not PlanarGirth/PlanarArc.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 import numpy as np
 import potpourri3d as pp3d
-from scipy.interpolate import splev, splprep
 from scipy.ndimage import gaussian_filter1d
 from scipy.spatial import ConvexHull, QhullError, cKDTree
 
-
-# Exception groups for narrowed `except` blocks. Splitting by failure
-# mode means a genuine bug (TypeError, AttributeError, KeyError) bubbles
-# up instead of being silently swallowed as NaN.
-SOLVER_ERRORS = (RuntimeError, IndexError)  # potpourri3d geodesic solver
-HULL_ERRORS = (QhullError, ValueError, IndexError)  # scipy ConvexHull
-SPLINE_ERRORS = (RuntimeError, ValueError, TypeError)  # scipy splprep
 
 from .landmarks import LandmarkSet
 from .mesh_ops import (
@@ -48,6 +41,13 @@ from .mesh_ops import (
     slice_mesh,
 )
 from .regions import region_vertex_mask
+
+
+# Exception groups for narrowed `except` blocks. Splitting by failure
+# mode means a genuine bug (TypeError, AttributeError, KeyError) bubbles
+# up instead of being silently swallowed as NaN.
+SOLVER_ERRORS = (RuntimeError, IndexError)  # potpourri3d geodesic solver
+HULL_ERRORS = (QhullError, ValueError, IndexError)  # scipy ConvexHull
 
 
 # ---------------------------------------------------------------------------
@@ -72,10 +72,6 @@ EPS_Y_PLANE_HIT = 1e-4
 # Right-edge inclusion for t-bin selection in DiagonalSurfacePlumb: each
 # bin is [t_i, t_{i+1} + EPS) so the last bin includes its right boundary.
 EPS_BIN_EDGE = 1e-9
-
-# Division-degenerate guards in face-normal accumulation. ~smaller than
-# any plausible normal magnitude on the SMPL-X mesh.
-EPS_NORMAL_CLIP = 1e-12
 
 
 # ---------------------------------------------------------------------------
@@ -287,13 +283,23 @@ class PolylineChord:
 
 
 # Geodesic solvers are expensive to construct (build edge structure); cache
-# per mesh-id.
-_GEODESIC_CACHE: dict[int, pp3d.EdgeFlipGeodesicSolver] = {}
+# per mesh CONTENT. Never key this on id(): a freed verts array's address
+# gets reused by the next body's allocation, so id() collides and hands
+# body k+1 the solver built on body k's mesh — geodesics silently computed
+# on the wrong body (few-cm shifts in G02/G03/G10/G11 and everything
+# derived; heap-layout-dependent, so it flips between processes). Bitten
+# by exactly that in the synthetic harness and ring-deform audit (both
+# extract several meshes per process).
+_GEODESIC_CACHE: dict[bytes, pp3d.EdgeFlipGeodesicSolver] = {}
+_GEODESIC_CACHE_MAX = 4  # FIFO cap; harness runs 30+ meshes per process
 
 
 def _get_solver(verts: np.ndarray, faces: np.ndarray) -> pp3d.EdgeFlipGeodesicSolver:
-    key = id(verts)
+    key = hashlib.sha1(np.ascontiguousarray(verts).tobytes()).digest() \
+        + hashlib.sha1(np.ascontiguousarray(faces).tobytes()).digest()
     if key not in _GEODESIC_CACHE:
+        while len(_GEODESIC_CACHE) >= _GEODESIC_CACHE_MAX:
+            _GEODESIC_CACHE.pop(next(iter(_GEODESIC_CACHE)))
         _GEODESIC_CACHE[key] = pp3d.EdgeFlipGeodesicSolver(
             verts.astype(np.float64), faces.astype(np.int64)
         )
@@ -403,84 +409,6 @@ class Formula:
 
 
 @dataclass(frozen=True)
-class HybridLoop:
-    """Closed loop combining a PLANAR arc on the back with a GEODESIC arc
-    on the front (or vice versa). Used when one half of a girth tape
-    should stay parallel to the floor (e.g. highbust back at underarm Y)
-    while the other half follows the body surface over a bulge (e.g.
-    highbust front over the bust).
-
-    Inputs:
-      plane_landmark: name of a landmark whose Y defines the planar
-        slice plane (horizontal).
-      planar_side: "back" or "front" — which side of the slice arc to use.
-      arc_endpoints: (left_name, right_name) — landmarks where the planar
-        arc starts/ends. The geodesic arc closes the loop from
-        right_endpoint -> geodesic_waypoints -> left_endpoint.
-      geodesic_waypoints: ordered landmark names visited by the geodesic
-        portion of the loop, between the two arc endpoints.
-      regions: region mask for the planar slice (default ("torso",)).
-    """
-    plane_landmark: str
-    planar_side: str
-    arc_endpoints: tuple[str, str]
-    geodesic_waypoints: tuple[str, ...] = ()
-    regions: tuple[str, ...] = ("torso",)
-
-    def _planar_arc(self, verts, faces, landmarks: LandmarkSet) -> np.ndarray | None:
-        origin = landmarks[self.plane_landmark]
-        # Strict torso mask so the slice doesn't include the arms. The
-        # segments form OPEN polylines (one for the back, one for the
-        # front, each cut at the arm-torso boundary near the underarms).
-        mask = region_vertex_mask(self.regions) if self.regions else None
-        segs = slice_mesh(verts, faces, origin, _y_axis(),
-                          vertex_mask=mask, strict_mask=True)
-        if not segs:
-            return None
-        # Collect all crossing points, then pick the BACK or FRONT subset
-        # by Z and order along X.
-        pts = np.vstack(segs)
-        is_back = self.planar_side == "back"
-        # Back: Z < 0 (in SMPL-X frame +Z = anterior). Front: Z > 0.
-        mask_z = pts[:, 2] < 0 if is_back else pts[:, 2] > 0
-        side_pts = pts[mask_z]
-        if len(side_pts) < 4:
-            return None
-        a = landmarks[self.arc_endpoints[0]]
-        b = landmarks[self.arc_endpoints[1]]
-        # Sort by X going from a's X to b's X.
-        order = np.argsort(side_pts[:, 0])
-        sorted_pts = side_pts[order]
-        if a[0] > b[0]:
-            sorted_pts = sorted_pts[::-1]
-        # Prepend/append the exact endpoints for a clean start/end.
-        return np.vstack([a[None], sorted_pts, b[None]])
-
-    def compute(self, verts, faces, landmarks: LandmarkSet) -> float:
-        back_arc = self._planar_arc(verts, faces, landmarks)
-        if back_arc is None:
-            return float("nan")
-        diffs = np.diff(back_arc, axis=0)
-        back_len = float(np.sqrt((diffs ** 2).sum(axis=1)).sum())
-        # Geodesic front: arc_endpoints[1] -> waypoints -> arc_endpoints[0]
-        solver = _get_solver(verts, faces)
-        v_ids = [_nearest_vertex(verts, landmarks[self.arc_endpoints[1]])]
-        for w in self.geodesic_waypoints:
-            v_ids.append(_nearest_vertex(verts, landmarks[w]))
-        v_ids.append(_nearest_vertex(verts, landmarks[self.arc_endpoints[0]]))
-        front_len = 0.0
-        for u, v in zip(v_ids, v_ids[1:]):
-            try:
-                p = solver.find_geodesic_path(u, v)
-            except SOLVER_ERRORS:
-                return float("nan")
-            if len(p) >= 2:
-                d = np.diff(p, axis=0)
-                front_len += float(np.sqrt((d ** 2).sum(axis=1)).sum())
-        return (back_len + front_len) * 100.0
-
-
-@dataclass(frozen=True)
 class SurfacePlumb:
     """Vertical strip on the body surface at a fixed X column.
 
@@ -570,62 +498,6 @@ class SurfacePlumb:
         if path is None:
             return float("nan")
         diffs = np.diff(path, axis=0)
-        return float(np.linalg.norm(diffs, axis=1).sum()) * 100.0
-
-
-@dataclass(frozen=True)
-class SmoothLoop:
-    """Closed smooth curve through an ordered set of waypoints, snapped
-    to the body surface between anchors.
-
-    Implementation: a periodic cubic B-spline (splprep with per=True)
-    through the anchor landmarks, then each sample is replaced with the
-    nearest body vertex (with a small outward normal offset). Length =
-    arc length of the snapped curve. Tape touches the anatomical anchors
-    AND lies on the body between them, with no V-dip from a body-surface
-    GeodesicLoop.
-    """
-    waypoints: tuple[str, ...]
-
-    def _spline(self, landmarks: LandmarkSet, samples: int = 200) -> np.ndarray | None:
-        pts = np.array([landmarks[w] for w in self.waypoints])
-        if len(pts) < 3:
-            return None
-        try:
-            tck, _ = splprep([pts[:, 0], pts[:, 1], pts[:, 2]],
-                             k=3, s=0.0, per=True)
-        except SPLINE_ERRORS:
-            return None
-        u = np.linspace(0.0, 1.0, samples)
-        xyz = splev(u, tck)
-        return np.stack(xyz, axis=1)
-
-    def _curve(self, verts, faces, landmarks: LandmarkSet,
-                 samples: int = 200) -> np.ndarray | None:
-        spline = self._spline(landmarks, samples=samples)
-        if spline is None or verts is None:
-            return spline
-        tree = cKDTree(verts)
-        _, nearest = tree.query(spline)
-        # Outward normal offset so the line sits just above the surface.
-        # Compute per-vertex normals locally (cheap; cached by caller).
-        v0 = verts[faces[:, 0]]
-        v1 = verts[faces[:, 1]]
-        v2 = verts[faces[:, 2]]
-        fn = np.cross(v1 - v0, v2 - v0)
-        n = np.linalg.norm(fn, axis=1, keepdims=True).clip(min=EPS_NORMAL_CLIP)
-        fn = fn / n
-        vn = np.zeros_like(verts)
-        for i in range(3):
-            np.add.at(vn, faces[:, i], fn)
-        vn = vn / np.linalg.norm(vn, axis=1, keepdims=True).clip(min=EPS_NORMAL_CLIP)
-        return verts[nearest] + vn[nearest] * 0.006
-
-    def compute(self, verts, faces, landmarks: LandmarkSet) -> float:
-        curve = self._curve(verts, faces, landmarks)
-        if curve is None:
-            return float("nan")
-        diffs = np.diff(curve, axis=0)
         return float(np.linalg.norm(diffs, axis=1).sum()) * 100.0
 
 
@@ -825,63 +697,6 @@ class DiagonalSurfacePlumb:
             sm[-1] = out[-1]
             out = sm
         return out
-
-    def compute(self, verts, faces, landmarks: LandmarkSet) -> float:
-        path = self._path(verts, faces, landmarks)
-        if path is None:
-            return float("nan")
-        return float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum()) * 100.0
-
-
-@dataclass(frozen=True)
-class DiagonalYardstick:
-    """Three-point yardstick. The middle touch point is the body surface
-    point at `mid_y_landmark.Y` nearest (in X/Z) to where the straight
-    chord(start, end) crosses that Y plane.
-
-    Mental model: tape stretched from start to end falls against the
-    body at the mid-Y level (e.g. bust line). The tape kinks at the
-    body's anterior surface where the diagonal projects onto that
-    horizontal plane — not at the bust apex itself, but wherever the
-    diagonal lands on the body at G04.
-    """
-    start: str
-    end: str
-    mid_y_landmark: str
-    side: str = "front"  # "front" (Z>0) or "back" (Z<0)
-    y_band: float = 0.012
-
-    def _touch(self, verts: np.ndarray, landmarks: LandmarkSet
-                ) -> np.ndarray | None:
-        s = landmarks[self.start]
-        e = landmarks[self.end]
-        my = float(landmarks[self.mid_y_landmark][1])
-        dy = float(e[1] - s[1])
-        if abs(dy) < EPS_VECTOR_NORM:
-            return None
-        t = (my - float(s[1])) / dy
-        mid_xz = s + t * (e - s)  # 3D point on the chord at Y=my
-        mask = np.abs(verts[:, 1] - my) < self.y_band
-        if self.side == "front":
-            mask &= verts[:, 2] > 0
-        elif self.side == "back":
-            mask &= verts[:, 2] < 0
-        if not mask.any():
-            return None
-        cand = verts[mask]
-        d = np.linalg.norm(cand[:, [0, 2]] - mid_xz[[0, 2]], axis=1)
-        return cand[int(np.argmin(d))]
-
-    def _path(self, verts, faces, landmarks: LandmarkSet) -> np.ndarray | None:
-        # `faces` kept in signature for parity with other recipes that
-        # `recipe_polyline` dispatches via `recipe._path(verts, faces, lm)`.
-        del faces
-        s = landmarks[self.start]
-        e = landmarks[self.end]
-        mid = self._touch(verts, landmarks)
-        if mid is None:
-            return np.vstack([s[None], e[None]])
-        return np.vstack([s[None], mid[None], e[None]])
 
     def compute(self, verts, faces, landmarks: LandmarkSet) -> float:
         path = self._path(verts, faces, landmarks)
@@ -1100,7 +915,8 @@ class TapeLoop:
         else:
             arc1 = list(range(pos_R, pos_L + 1))
             arc2 = list(range(pos_L, h)) + list(range(0, pos_R + 1))
-        a1 = hull[arc1]; a2 = hull[arc2]
+        a1 = hull[arc1]
+        a2 = hull[arc2]
         want_back = side == "back"
         if want_back:
             chosen = a1 if a1[:, 2].mean() < a2[:, 2].mean() else a2
@@ -1168,9 +984,9 @@ class TapeLoop:
 PrimitiveRecipe = (
     Height | PlanarGirth | PlanarArc | LateralChord
     | LandmarkChord | VerticalDrop | PolylineChord
-    | Geodesic | GeodesicLoop | HybridLoop | TapeLoop
-    | LimbGirth | SmoothLoop | SurfacePlumb
-    | SurfacePlumbThenDrop | GeodesicThenDrop | DiagonalYardstick
+    | Geodesic | GeodesicLoop | TapeLoop
+    | LimbGirth | SurfacePlumb
+    | SurfacePlumbThenDrop | GeodesicThenDrop
     | DiagonalSurfacePlumb
 )
 
@@ -1389,9 +1205,6 @@ def recipe_polyline(recipe, verts, faces, landmarks: LandmarkSet) -> np.ndarray 
         if isinstance(recipe, TapeLoop):
             return recipe.polyline(verts, faces, landmarks)
 
-        if isinstance(recipe, SmoothLoop):
-            return recipe._curve(verts, faces, landmarks)
-
         if isinstance(recipe, SurfacePlumb):
             return recipe._path(verts, faces, landmarks)
 
@@ -1399,9 +1212,6 @@ def recipe_polyline(recipe, verts, faces, landmarks: LandmarkSet) -> np.ndarray 
             return recipe._path(verts, faces, landmarks)
 
         if isinstance(recipe, GeodesicThenDrop):
-            return recipe._path(verts, faces, landmarks)
-
-        if isinstance(recipe, DiagonalYardstick):
             return recipe._path(verts, faces, landmarks)
 
         if isinstance(recipe, DiagonalSurfacePlumb):
@@ -1423,34 +1233,9 @@ def recipe_polyline(recipe, verts, faces, landmarks: LandmarkSet) -> np.ndarray 
             except HULL_ERRORS:
                 return np.vstack([loop, loop[:1]])
             return np.vstack([loop[hull], loop[hull[:1]]])
-
-        if isinstance(recipe, HybridLoop):
-            back_arc = recipe._planar_arc(verts, faces, landmarks)
-            if back_arc is None:
-                return None
-            solver = _get_solver(verts, faces)
-            v_ids = [_nearest_vertex(verts, landmarks[recipe.arc_endpoints[1]])]
-            for w in recipe.geodesic_waypoints:
-                v_ids.append(_nearest_vertex(verts, landmarks[w]))
-            v_ids.append(_nearest_vertex(verts, landmarks[recipe.arc_endpoints[0]]))
-            front_segs = []
-            for u, v in zip(v_ids, v_ids[1:]):
-                p = np.asarray(solver.find_geodesic_path(u, v))
-                if len(p) >= 2:
-                    front_segs.append(p)
-            front = [front_segs[0]] if front_segs else []
-            for s in front_segs[1:]:
-                front.append(s[1:])
-            front_poly = np.vstack(front) if front else np.empty((0, 3))
-            # Close the loop: back_arc ends at arc_endpoints[1], front_poly
-            # starts there; back_arc starts at arc_endpoints[0], front_poly
-            # ends there. Concatenate skipping shared endpoint.
-            if len(front_poly) > 0:
-                return np.vstack([back_arc, front_poly[1:]])
-            return back_arc
     # Outer catch-all stays broad: this is purely viz, partial polyline
     # is better than crashing the viewer. Individual sites above narrow
-    # solver/hull/spline failures; this catches anything else (KeyError
+    # solver/hull failures; this catches anything else (KeyError
     # from a missing landmark, AttributeError, etc.).
     except Exception:
         return None

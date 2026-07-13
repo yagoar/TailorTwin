@@ -17,13 +17,3 @@ def initial_transl(
 ) -> np.ndarray:
     """Translation that aligns vertex centroids."""
     return scan_verts.mean(0) - smplx_canonical_verts.mean(0)
-
-
-def initial_global_orient() -> np.ndarray:
-    """Zero global rotation — scan already in SMPL-X frame."""
-    return np.zeros(3, dtype=np.float32)
-
-
-def scan_height(verts: np.ndarray) -> float:
-    """Y-extent of the scan."""
-    return float(verts[:, 1].max() - verts[:, 1].min())

@@ -11,31 +11,11 @@ from tailor_twin.gui.forms import (
     build_cmd,
     build_preflight_cmd,
     nest_out_prefix,
-    slugify,
     split_person_name,
     validate,
     validate_capture_only,
 )
 from tailor_twin.gui.runner import Runner
-
-
-# ---------------------------------------------------------------------------
-# slugify
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("name, expected", [
-    ("Yaiza Gómez", "yaiza_g_mez"),
-    ("Hello World", "hello_world"),
-    ("  trim  me  ", "trim_me"),
-    ("---weird-/?chars!!!", "weird_chars"),
-    ("", "scan"),
-    ("   ", "scan"),
-    ("ALL CAPS", "all_caps"),
-    ("a1b2", "a1b2"),
-])
-def test_slugify(name: str, expected: str) -> None:
-    assert slugify(name) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +218,11 @@ def test_validate_waist_height_exceeds_height(tmp_path: Path) -> None:
     # equal is also rejected; and without a height it can't be checked.
     assert validate(_good(tmp_path, height="160", waist_height="160"))
     assert validate(_good(tmp_path, waist_height="170")) is None
+
+
+def test_build_cmd_no_fusion(tmp_path: Path) -> None:
+    assert "--no-fusion" in build_cmd(_good(tmp_path, no_fusion="on"))
+    assert "--no-fusion" not in build_cmd(_good(tmp_path))
 
 
 def test_build_cmd_pose_graph_and_clean_fit(tmp_path: Path) -> None:

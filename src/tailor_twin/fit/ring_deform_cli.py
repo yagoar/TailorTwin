@@ -236,15 +236,20 @@ def main(argv: list[str] | None = None) -> int:
         lm = build_landmark_set(
             deformed.astype(np.float32), joints=joints, faces=faces,
             gender=gender)
-        cat = extract_catalog(
-            deformed.astype(np.float32), faces, joints=joints,
-            gender=gender, landmarks=lm)
+        if p == 0 and audit_before is not None:
+            # The mesh hasn't moved since the audit baseline was
+            # extracted — reuse it instead of re-running the extractor.
+            cat_values = audit_before
+        else:
+            cat_values = extract_catalog(
+                deformed.astype(np.float32), faces, joints=joints,
+                gender=gender, landmarks=lm).values
 
         ys: list[float] = []
         scales: list[float] = []
         max_resid = 0.0
         for t in ring_targets:
-            current = cat.values.get(t.code)
+            current = cat_values.get(t.code)
             if current is None or not (current > 0):
                 print(f"  pass {p+1} {t.code}: extractor gave no value, skip")
                 continue

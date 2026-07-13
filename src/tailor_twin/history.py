@@ -96,6 +96,38 @@ def previous_values(db_path: Path, *, person: str) -> dict[str, float] | None:
     return {code: float(v) for code, v in rows}
 
 
+def list_persons(db_path: Path) -> list[tuple[str, int, str]]:
+    """(person, run_count, last_run_ts) per person, most recent first."""
+    if not Path(db_path).is_file():
+        return []
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT person, COUNT(*), MAX(ts) FROM runs "
+            "GROUP BY person ORDER BY MAX(ts) DESC").fetchall()
+    return [(p, int(n), ts) for p, n, ts in rows]
+
+
+def list_runs(
+    db_path: Path, *, person: str, limit: int = 10,
+) -> list[tuple[int, str, str]]:
+    """(run_id, ts, out_prefix) for a person, newest first."""
+    if not Path(db_path).is_file():
+        return []
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, ts, out_prefix FROM runs WHERE person = ? "
+            "ORDER BY id DESC LIMIT ?", (person, limit)).fetchall()
+    return [(int(i), ts, op) for i, ts, op in rows]
+
+
+def values_for_run(db_path: Path, run_id: int) -> dict[str, float]:
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT code, value_cm FROM measurements WHERE run_id = ?",
+            (run_id,)).fetchall()
+    return {code: float(v) for code, v in rows}
+
+
 def drift_rows(
     current: dict[str, float],
     previous: dict[str, float],
@@ -116,3 +148,61 @@ def drift_rows(
             rows.append((code, p, c, d))
     rows.sort(key=lambda r: -abs(r[3]))
     return rows
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m tailor_twin.history [PERSON]`` — inspect the store.
+
+    Without PERSON: list everyone with run counts. With PERSON: list
+    their recent runs and the per-code drift between the last two.
+    """
+    import argparse
+
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("person", nargs="?", default=None)
+    p.add_argument("--db", type=Path,
+                   default=Path("data/results/history.sqlite"))
+    p.add_argument("--limit", type=int, default=10,
+                   help="Max runs to list (default 10).")
+    p.add_argument("--tol-cm", type=float, default=1.0,
+                   help="Drift threshold for the last-two-runs report.")
+    args = p.parse_args(argv)
+
+    if not args.db.is_file():
+        print(f"no history DB at {args.db}")
+        return 1
+
+    if args.person is None:
+        persons = list_persons(args.db)
+        if not persons:
+            print("history DB is empty")
+            return 0
+        print(f"{'person':<30} {'runs':>5}  last run")
+        for person, n, ts in persons:
+            print(f"{person:<30} {n:>5}  {ts}")
+        return 0
+
+    runs = list_runs(args.db, person=args.person, limit=args.limit)
+    if not runs:
+        print(f"no runs recorded for {args.person!r}")
+        return 1
+    print(f"runs for {args.person!r} (newest first):")
+    for run_id, ts, out_prefix in runs:
+        print(f"  #{run_id}  {ts}  {out_prefix}")
+    if len(runs) >= 2:
+        cur = values_for_run(args.db, runs[0][0])
+        prev = values_for_run(args.db, runs[1][0])
+        moved = drift_rows(cur, prev, tol_cm=args.tol_cm)
+        if moved:
+            print(f"\ndrift ≥ {args.tol_cm:g} cm between run #{runs[1][0]} "
+                  f"and #{runs[0][0]}:")
+            for code, p_cm, c_cm, d in moved:
+                print(f"  {code}: {p_cm:.2f} → {c_cm:.2f} cm ({d:+.2f})")
+        else:
+            print(f"\nlast two runs agree within {args.tol_cm:g} cm on "
+                  "every shared code")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

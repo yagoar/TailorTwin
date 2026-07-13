@@ -1,11 +1,11 @@
 // TailorTwin scan GUI — client logic.
 //
-// Reads bootstrap config from the global window.MYFIT_CFG that
+// Reads bootstrap config from the global window.TAILORTWIN_CFG that
 // index.html renders, wires up the form, the SSE log stream, and
 // the how-to modal.
 
 (function () {
-  const cfg = window.MYFIT_CFG || {};
+  const cfg = window.TAILORTWIN_CFG || {};
   const $ = (id) => document.getElementById(id);
 
   const slug = (s) =>

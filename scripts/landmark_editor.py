@@ -18,7 +18,12 @@ Launch:
       --out       data/results/PAIR_landmarks.json
 """
 from __future__ import annotations
-import argparse, base64, io, json, sys, threading, webbrowser
+
+import argparse
+import base64
+import json
+import threading
+import webbrowser
 from pathlib import Path
 
 import cv2
@@ -388,7 +393,8 @@ def encode_silhouette_png(seg_path: str, drop_classes=(),
             raise FileNotFoundError(f"could not read photo: {photo_path}")
         if photo.shape[:2] != (H, W):
             photo = cv2.resize(photo, (W, H), interpolation=cv2.INTER_AREA)
-        cyan = np.zeros_like(photo); cyan[:, :] = (255, 255, 0)
+        cyan = np.zeros_like(photo)
+        cyan[:, :] = (255, 255, 0)
         blended = (photo.astype(np.float32) * (1 - alpha) +
                    cyan.astype(np.float32) * alpha).astype(np.uint8)
         dim = (photo.astype(np.float32) * 0.4).astype(np.uint8)
@@ -428,8 +434,10 @@ def main(argv=None):
         return cand if cand.exists() else None
     front_photo = args.front_photo or auto_photo(args.front_seg, "front")
     side_photo  = args.side_photo  or auto_photo(args.side_seg,  "side")
-    if front_photo: print(f"front photo: {front_photo}")
-    if side_photo:  print(f"side  photo: {side_photo}")
+    if front_photo:
+        print(f"front photo: {front_photo}")
+    if side_photo:
+        print(f"side  photo: {side_photo}")
 
     front_b64, front_size, front_bbox = encode_silhouette_png(
         str(args.front_seg), tuple(args.front_drop_classes),
@@ -452,7 +460,8 @@ def main(argv=None):
                 print(f"migrating v1 → v2 from {args.out}")
                 for view in ("front", "side"):
                     for n, xy in (existing.get(view, {}) or {}).items():
-                        if not xy: continue
+                        if not xy:
+                            continue
                         if n in Y_LANDMARKS:
                             prior["lines_y"].setdefault(n, {})[view] = int(xy[1])
                         elif n in ("shoulder_L", "shoulder_R"):

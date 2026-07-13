@@ -44,6 +44,8 @@ user effort?*
 
 ### Definition of done for any accuracy-affecting change
 
+(`docs/TEST_RUN.md` is the step-by-step version of this list.)
+
 1. Light test suite green.
 2. `tests/test_yaiza_snapshot.py` green on the user's machine (or the
    diff explained and the snapshot deliberately regenerated).
@@ -70,9 +72,9 @@ user effort?*
 
 | # | Workstream | Serves goal | Needs ML env | Model capability | Status |
 |---|-----------|-------------|--------------|------------------|--------|
-| A | Synthetic validation harness | both (safety net) | yes (user machine) | small OK, verify on user machine | todo |
+| A | Synthetic validation harness | both (safety net) | yes (user machine) | small OK, verify on user machine | implemented — generate snapshot on user machine |
 | B | Self-rotation capture (no helper) | 1 | yes + research | **capable model + human review** | B1 implemented, awaiting user A/B run |
-| C | CLO3D avatar quality | 2 | partly | small OK (docs/export), human verifies in CLO3D | todo |
+| C | CLO3D avatar quality | 2 | partly | small OK (docs/export), human verifies in CLO3D | doc + checklist written (`docs/clo3d_avatar.md`); UVs/pose-field todo |
 | D | Anthropometric sanity layer | 1 | partly | small OK (SMPL-X path); medium for external data | sources researched |
 | E | Uncertainty + block-critical tier | both | partly | small OK for tiering; medium for uncertainty | todo |
 | F | In-process pipeline refactor | maintainability | yes (verification) | medium; gate on A | todo |
@@ -97,35 +99,29 @@ checking (a) that nothing *changes unintentionally* across code edits,
 of bodies, and (c) smoothness/invariance properties that must hold
 regardless of truth.
 
-**Files:** new `scripts/validate_synthetic.py` + new
-`tests/test_synthetic_snapshot.py` (skipped when model file absent,
-same pattern as `tests/test_yaiza_snapshot.py`).
+**Status: IMPLEMENTED — snapshot pending.** Core logic in
+`src/tailor_twin/measure/synthetic.py` (sampling, body build mirroring
+ring_deform_cli/clean_fit, extraction mirroring measure/cli.py, mesh
+volume for the Workstream D weight proxy, pure snapshot compare), CLI
+in `scripts/validate_synthetic.py`, gate in
+`tests/test_synthetic_harness.py` (pure parts tested everywhere; the
+regression gate auto-skips until the model file + snapshot exist).
 
-**Steps:**
-1. Sample N=30 bodies: fixed RNG seed, betas ~ N(0, 1) on the first 10
-   components (rest zero), female model, canonical A-pose 30°
-   (`tailor_twin.fit.refine_to_tape._build_a_pose`), no displacement.
-2. For each body run `measure.seamly_extractor.extract_catalog` with a
-   `build_landmark_set` built the same way `measure/cli.py` does.
-3. Assert zero unexpected `skipped` codes (compare against a committed
-   allowlist — some codes legitimately skip).
-4. Write `{body_index: {code: value}}` to
-   `tests/data/synthetic_snapshot.json` (committed); the test compares
-   within ±0.05 cm and prints per-code diffs on failure.
-5. Invariance checks: mirrored betas on symmetric components produce
-   equal left/right code pairs; small beta perturbation (±0.05) moves
-   every code < 1.5 cm (catches landmark rules that "jump" between
-   vertices).
-6. Bonus: run `ring_deform_cli` logic in-process on one synthetic body
-   with 3 targets; assert targets hit within 0.3 cm and
-   `audit_girth_drift` flags nothing unanchored beyond 1 cm.
+**Next action (user machine):**
 
-**Acceptance:** harness runs on the user's machine in < 10 min; test is
-auto-skipped without the model file; snapshot committed.
+    .venv/bin/python scripts/validate_synthetic.py --write   # ~min, 30 bodies
+    # review the printed skip counts, commit tests/data/synthetic_snapshot.json
+    .venv/bin/python scripts/validate_synthetic.py --perturb # smoothness check
 
-**Small-model guidance:** safe to write; do NOT hand-edit snapshot
-values — they must come from an actual harness run on the user's
-machine.
+**Acceptance:** harness runs in < 10 min; snapshot committed; the
+`--perturb` run reports no code jumping > 1.5 cm under a 0.05-beta
+jitter (any jump = a landmark rule snapping between vertices — file it
+as a bug with the body's betas from the report).
+
+**Small-model guidance:** do NOT hand-edit snapshot values — they must
+come from an actual harness run on the user's machine. Extending the
+harness (e.g. the ring-deform round-trip check from the original plan)
+is safe to draft against `run_harness`'s report format.
 
 ---
 
@@ -332,16 +328,14 @@ the user tests, never self-merge on green light-tests alone.
 
 ## Workstream G — Small fixes (any session)
 
-- [ ] Pre-existing ruff findings: unused imports in
-      `fit/refine_to_tape.py` (`build_landmark_set`, `RECIPES`);
-      `E702` semicolons in `gui/viewer_data.py`; a few more — run
-      `ruff check src/` for the list.
-- [ ] `fit/ring_deform_cli.py`: the audit baseline duplicates the
-      pass-1 extraction — reuse it (pure speed, no behavior change).
+- [x] Pre-existing ruff findings — repo is `ruff check` clean now;
+      keep it that way.
+- [x] `fit/ring_deform_cli.py`: audit baseline reused as the pass-1
+      extraction (pure speed, no behavior change).
+- [x] `history.py` CLI: `python -m tailor_twin.history` lists persons;
+      `… <person>` lists runs + last-two-runs drift.
 - [ ] GUI: show the history drift report and tape audit in the run log
       panel more prominently (they're plain stdout lines today).
-- [ ] `history.py`: tiny CLI (`python -m tailor_twin.history <person>`)
-      to list a person's runs and per-code trend.
 - [ ] Bent-arm: document in SPEC §11 the *option* of a second short
       bent-arm capture (SPEC §9.1 option 1) as a validation reference
       for the virtual re-pose — protocol text only until someone

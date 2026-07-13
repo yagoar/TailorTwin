@@ -136,6 +136,8 @@
               Clean fit (symmetrise, A-pose)</label>
             <label class="chip"><input type="checkbox" name="pose_graph">
               Drift-correct fusion (slower)</label>
+            <label class="chip"><input type="checkbox" name="no_fusion">
+              Fusion-free fit (experimental)</label>
           </div>
           <div class="help">
             <b>Clean fit</b> — keep on. Mirrors the body left/right to remove
@@ -144,7 +146,11 @@
             measurement; off only to inspect the raw fit.<br>
             <b>Drift-correct fusion</b> — leave off. Re-aligns the frames to
             cancel <em>camera</em> drift; only worth it if a mesh comes out
-            doubled/ghosted. Slower, and it can't fix a subject who moved.
+            doubled/ghosted. Slower, and it can't fix a subject who moved.<br>
+            <b>Fusion-free fit</b> — experimental. Skips TSDF fusion and fits
+            the body straight to the per-frame depth points, so subject sway
+            averages out in the fit instead of blurring the mesh. Run the
+            same capture with and without it and compare the drift report.
           </div>
         </div>
       </div>
@@ -278,7 +284,7 @@
 </div><!-- /wrap -->
 
 <script>
-  window.MYFIT_CFG = {
+  window.TAILORTWIN_CFG = {
     today: {{ today | tojson }},
     defaultResults: {{ default_results | tojson }}
   };

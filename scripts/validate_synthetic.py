@@ -10,8 +10,8 @@ Gate a change (compares against the snapshot, exit 1 on drift)::
 
     .venv/bin/python scripts/validate_synthetic.py
 
-Add the smoothness check (2x runtime; flags landmark rules that snap
-between vertices under a tiny beta jitter)::
+Add the smoothness check (~(active_betas+1)x runtime; flags landmark
+rules that snap between vertices under a per-beta jitter)::
 
     .venv/bin/python scripts/validate_synthetic.py --perturb
 
@@ -54,9 +54,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--write", action="store_true",
                    help="Regenerate the snapshot instead of comparing.")
     p.add_argument("--perturb", action="store_true",
-                   help="Also run the beta-jitter smoothness check (2x "
-                        "runtime). Jumps are recorded per body; any jump "
-                        "fails the run.")
+                   help="Also run the per-beta jitter smoothness check "
+                        "(~(active_betas+1)x runtime). Worst per-code jump "
+                        "and its beta are recorded per body; any jump fails "
+                        "the run.")
     args = p.parse_args(argv)
 
     report = run_harness(
@@ -77,9 +78,13 @@ def main(argv: list[str] | None = None) -> int:
                  if rec.get("perturb_jumps_cm")]
         if jumpy:
             print(f"\nSMOOTHNESS: {len(jumpy)} body(ies) with code jumps "
-                  "under a 0.05-beta jitter (landmark rule snapping?):")
+                  "under a per-beta +0.05 jitter (landmark rule snapping?):")
             for i, jumps in jumpy:
-                print(f"  body {i}: {jumps}")
+                pretty = ", ".join(
+                    f"{c}={d['cm']}cm@β{d['beta']}"
+                    for c, d in sorted(jumps.items(),
+                                       key=lambda kv: -kv[1]["cm"]))
+                print(f"  body {i}: {pretty}")
             rc = 1
         else:
             print("\nsmoothness: no code jumped > threshold under jitter")

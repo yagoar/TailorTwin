@@ -222,6 +222,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = p.parse_args(argv)
 
+    # Multi-threaded CPU reductions in torch forward passes (bent-arm
+    # re-pose, model rebuilds) are not bitwise run-to-run stable; ULP
+    # vertex noise can tip near-tie landmark searches onto a different
+    # vertex. Single-thread keeps repeat runs on the same fit.npz
+    # reproducible. (Same pin as measure/synthetic.py's run_harness.)
+    import torch
+    torch.set_num_threads(1)
+
     # Photo-derived per-girth Y overrides (from manual landmark editor).
     y_overrides: dict[str, float] | None = None
     if args.landmarks is not None:

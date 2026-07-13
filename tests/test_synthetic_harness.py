@@ -18,6 +18,7 @@ from tailor_twin.measure.synthetic import (
     compare_reports,
     mesh_volume_m3,
     sample_betas,
+    worst_perturb_jumps,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,36 @@ def test_mesh_volume_unit_cube() -> None:
         [1, 5, 7], [1, 7, 3],   # z=1
     ])
     assert mesh_volume_m3(v, f) == pytest.approx(1.0)
+
+
+def test_worst_perturb_jumps_isolates_axis_and_reports_beta() -> None:
+    base = {"K13": 40.0, "G07": 70.0, "A01": 160.0}
+    # beta 0 leaves everything smooth; beta 1 snaps K13; beta 2 wiggles
+    # K13 a little (smaller than the beta-1 snap).
+    variants = [
+        (0, {"K13": 40.1, "G07": 70.2, "A01": 160.1}),
+        (1, {"K13": 53.2, "G07": 70.3, "A01": 160.0}),
+        (2, {"K13": 41.0, "G07": 70.1, "A01": 159.9}),
+    ]
+    out = worst_perturb_jumps(base, variants, threshold_cm=1.5)
+    # Only K13 exceeds threshold; worst jump is the beta-1 snap.
+    assert set(out) == {"K13"}
+    assert out["K13"] == {"cm": 13.2, "beta": 1}
+
+
+def test_worst_perturb_jumps_empty_when_all_smooth() -> None:
+    base = {"G07": 70.0}
+    variants = [(0, {"G07": 70.4}), (1, {"G07": 69.7})]
+    assert worst_perturb_jumps(base, variants, threshold_cm=1.5) == {}
+
+
+def test_worst_perturb_jumps_tolerates_missing_code_in_variant() -> None:
+    # A code skipped in one variant (dynamic search threw) must not crash;
+    # it's simply ignored for that axis.
+    base = {"K13": 40.0}
+    variants = [(0, {}), (1, {"K13": 44.0})]
+    out = worst_perturb_jumps(base, variants, threshold_cm=1.5)
+    assert out == {"K13": {"cm": 4.0, "beta": 1}}
 
 
 def _report() -> dict:

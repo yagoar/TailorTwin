@@ -15,8 +15,12 @@ This is NOT a truth test (the extractor grades its own homework on
 absolute values) — it is (a) an unintended-change detector across many
 body shapes, (b) a does-every-landmark-rule-succeed gate (dynamic
 searches have historically thrown on unusual figures), and (c) a
-smoothness check (``--perturb``): a tiny beta jitter must not make any
-code jump, which catches landmark rules that flip between vertices.
+smoothness check (``--perturb``): nudging one active beta at a time by a
+tiny amount must not make any code jump, which catches landmark rules
+that flip between vertices. The jitter is applied **per beta** (not to
+all active betas at once, same sign) so a genuine single-code snap is
+not buried under the coherent whole-body resize that a same-sign shove
+of every axis produces; the offending beta index is reported.
 
 Each body also records its mesh volume — a weight proxy that feeds the
 Workstream D plausibility prior (see references/anthropometry/README.md,
@@ -115,6 +119,41 @@ def extract_body(
     return values, skipped
 
 
+def worst_perturb_jumps(
+    baseline: dict[str, float],
+    variants: list[tuple[int, dict[str, float]]],
+    threshold_cm: float = PERTURB_MAX_JUMP_CM,
+) -> dict[str, dict]:
+    """Per-code worst single-beta jump (pure — unit-tested without ML).
+
+    ``baseline`` is the unperturbed ``{code: value}``. ``variants`` pairs
+    each active beta index with the ``{code: value}`` obtained by nudging
+    ONLY that beta by +eps. For every code, take the largest absolute
+    change across all single-axis nudges; return
+    ``{code: {"cm": jump, "beta": j}}`` for those exceeding
+    ``threshold_cm``.
+
+    Nudging one axis at a time isolates a landmark rule snapping between
+    vertices (one code jumps, the rest stay put) from a coherent
+    whole-body resize (dozens of codes all move together) — the latter is
+    a smooth, legitimate shape response that a same-sign shove of every
+    active beta at once mislabelled as a jump.
+    """
+    out: dict[str, dict] = {}
+    for code, base_val in baseline.items():
+        best_cm = 0.0
+        best_j = -1
+        for j, vals in variants:
+            if code not in vals:
+                continue
+            d = abs(vals[code] - base_val)
+            if d > best_cm:
+                best_cm, best_j = d, j
+        if best_cm > threshold_cm:
+            out[code] = {"cm": round(best_cm, 3), "beta": best_j}
+    return out
+
+
 def run_harness(
     *,
     model_folder: str = "data/body_models",
@@ -130,11 +169,20 @@ def run_harness(
     """Extract the catalog for every sampled body; return the report dict
     (the thing that gets snapshotted).
 
-    ``perturb=True`` additionally re-extracts each body with every active
-    beta nudged by +PERTURB_EPS and records the max per-code jump —
-    the smoothness check. Doubles the runtime.
+    ``perturb=True`` additionally re-extracts each body once per active
+    beta (that one beta nudged by +PERTURB_EPS, the rest untouched) and
+    records each code's worst single-axis jump plus the offending beta —
+    the smoothness check. Costs ~(active_betas + 1)x the base runtime.
     """
     import smplx
+    import torch
+
+    # Multi-threaded CPU reductions in the SMPL-X forward pass are not
+    # bitwise run-to-run stable; ULP-level vertex noise can tip near-tie
+    # landmark searches onto a different vertex (a ~3 cm code jump seen
+    # across otherwise identical harness runs). Single-thread pins the
+    # reduction order so the snapshot gate is reproducible.
+    torch.set_num_threads(1)
 
     bm = smplx.create(
         model_path=model_folder, model_type="smplx", gender=gender,
@@ -155,17 +203,14 @@ def run_harness(
             "skipped": skipped,
         }
         if perturb:
-            jit = betas.copy()
-            jit[:active_betas] += PERTURB_EPS
-            v2, j2 = build_body(bm, jit, apose_deg)
-            values2, _ = extract_body(v2, faces, j2, gender)
-            jumps = {
-                code: round(abs(values2[code] - val), 3)
-                for code, val in values.items()
-                if code in values2
-                and abs(values2[code] - val) > PERTURB_MAX_JUMP_CM
-            }
-            rec["perturb_jumps_cm"] = jumps
+            variants: list[tuple[int, dict[str, float]]] = []
+            for j in range(active_betas):
+                jit = betas.copy()
+                jit[j] += PERTURB_EPS
+                vj, jj = build_body(bm, jit, apose_deg)
+                valj, _ = extract_body(vj, faces, jj, gender)
+                variants.append((j, valj))
+            rec["perturb_jumps_cm"] = worst_perturb_jumps(values, variants)
         bodies.append(rec)
         if progress:
             n_skip = len(skipped)

@@ -21,6 +21,7 @@ not PlanarGirth/PlanarArc.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 import numpy as np
@@ -282,13 +283,23 @@ class PolylineChord:
 
 
 # Geodesic solvers are expensive to construct (build edge structure); cache
-# per mesh-id.
-_GEODESIC_CACHE: dict[int, pp3d.EdgeFlipGeodesicSolver] = {}
+# per mesh CONTENT. Never key this on id(): a freed verts array's address
+# gets reused by the next body's allocation, so id() collides and hands
+# body k+1 the solver built on body k's mesh — geodesics silently computed
+# on the wrong body (few-cm shifts in G02/G03/G10/G11 and everything
+# derived; heap-layout-dependent, so it flips between processes). Bitten
+# by exactly that in the synthetic harness and ring-deform audit (both
+# extract several meshes per process).
+_GEODESIC_CACHE: dict[bytes, pp3d.EdgeFlipGeodesicSolver] = {}
+_GEODESIC_CACHE_MAX = 4  # FIFO cap; harness runs 30+ meshes per process
 
 
 def _get_solver(verts: np.ndarray, faces: np.ndarray) -> pp3d.EdgeFlipGeodesicSolver:
-    key = id(verts)
+    key = hashlib.sha1(np.ascontiguousarray(verts).tobytes()).digest() \
+        + hashlib.sha1(np.ascontiguousarray(faces).tobytes()).digest()
     if key not in _GEODESIC_CACHE:
+        while len(_GEODESIC_CACHE) >= _GEODESIC_CACHE_MAX:
+            _GEODESIC_CACHE.pop(next(iter(_GEODESIC_CACHE)))
         _GEODESIC_CACHE[key] = pp3d.EdgeFlipGeodesicSolver(
             verts.astype(np.float64), faces.astype(np.int64)
         )
